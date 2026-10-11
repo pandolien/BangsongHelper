@@ -70,7 +70,6 @@
 | `run.bat game-map` | 게임 짝 목록 보기 |
 | `run.bat game-map-add 2622380 "나이트레인" --memo "메모"` | 게임 짝 추가 / 수정 (gameid 자리에 exe 이름도 가능) |
 | `run.bat game-map-remove 2622380` | 게임 짝 삭제 |
-| `run.bat make-upload-config` | 개인정보를 뺀 `data/init_upload.json` 다시 만들기 |
 
 ---
 
@@ -81,15 +80,21 @@
 
 | 파일 | 내용 | 공유 |
 |---|---|---|
-| `data/init.json` | 모든 설정 + **API 키 · Secret · 토큰** (처음 실행 시 자동 생성) | ❌ 절대 금지 |
+| `data/init.json` | 모든 설정 + API 키 · Secret · 토큰. 저장소에는 **키를 비운 양식**으로 올라가 있음 | ⚠️ 빈 양식만 |
 | `data/donations.json` | 받은 후원 기록 (닉네임 · 금액 · 내용) | ❌ |
 | `data/missions.json` | 미션 기록 | ❌ |
 | `data/youtube_quota.json` | 유튜브 오늘 사용량 | ❌ |
 | `data/error.log` | 오류 기록 | ⚠️ 확인 후 |
 | `data/mission_timer.txt` | OBS 에 띄우는 미션 타이머 (1초마다 갱신) | — |
-| `data/init_upload.json` | 키 · ID · 토큰을 **뺀** 설정 양식 | ✅ 가능 |
 | `data/game_map.txt` | 게임 ↔ 치지직 카테고리 짝 목록 | ✅ 가능 |
 | `docs/chzzkControl_정리.pdf` | 그림으로 보는 사용 안내서 | ✅ 가능 |
+
+> **주의:** 키를 넣거나 치지직 로그인을 하면 `data/init.json` 에 진짜 키 · 토큰이 저장됩니다.
+> 그대로 `git add .` 하면 깃허브에 올라가니, 키를 넣은 뒤 한 번 아래 명령을 실행해 두세요. (이 PC 에서 이 파일 변경을 무시)
+>
+> ```
+> git update-index --skip-worktree data/init.json
+> ```
 
 ### 소스 코드 구성
 
