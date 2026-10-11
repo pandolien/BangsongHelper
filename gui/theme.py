@@ -88,7 +88,7 @@ def _ArrowImage(strName: str, strPoints: str, strColor: str) -> str:
 
     색을 입히면 Qt 가 화살표를 그려주지 않아서 직접 그림을 만들어 줘야 해요.
     """
-    strDir = os.path.join(tempfile.gettempdir(), "chzzkControl_theme")
+    strDir = os.path.join(tempfile.gettempdir(), "BangsongHelper_theme")
     strPath = os.path.join(strDir, f"{strName}_{strColor.lstrip('#')}.svg")
     if not os.path.exists(strPath):
         try:

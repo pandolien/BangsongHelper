@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 rem ==========================================================================
 rem  Build the user guide PDF from guide.html (uses Chrome or Edge, headless)
-rem  Output: ..\chzzkControl_*.pdf (overwrites the existing guide PDF)
+rem  Output: ..\BangsongHelper_*.pdf (overwrites the existing guide PDF)
 rem  NOTE: keep this file ASCII only. Korean text breaks cmd.exe parsing.
 rem ==========================================================================
 
@@ -25,8 +25,8 @@ if not exist "guide.pdf" (
 
 rem Copy over the existing guide PDF (its name has Korean, so match by wildcard).
 set "TARGET="
-for %%F in ("..\chzzkControl_*.pdf") do set "TARGET=%%~fF"
-if not defined TARGET set "TARGET=%~dp0..\chzzkControl_guide.pdf"
+for %%F in ("..\BangsongHelper_*.pdf") do set "TARGET=%%~fF"
+if not defined TARGET set "TARGET=%~dp0..\BangsongHelper_guide.pdf"
 copy /y "guide.pdf" "!TARGET!" > nul
 del "guide.pdf"
 echo Done: !TARGET!

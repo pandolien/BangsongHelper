@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
 rem ==========================================================================
-rem  chezzControl installer
+rem  BangsongHelper installer
 rem    1) Find Python 3.10+
 rem    2) If missing, install Python 3.12 (winget first, then python.org)
 rem    3) Create the project virtual environment (.venv)
@@ -17,7 +17,7 @@ set "PY_USER_EXE=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 set "PYTHON="
 
 echo ============================================
-echo   chezzControl setup
+echo   BangsongHelper setup
 echo ============================================
 echo.
 

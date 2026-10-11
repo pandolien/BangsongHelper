@@ -5,7 +5,7 @@
 설정(init.json), 게임 짝(game_map.txt), 후원 · 미션 기록은 모두 'data' 폴더에 저장해요.
 
 - 파이썬으로 실행할 때(run.bat): 이 파일이 있는 폴더 = 프로그램 폴더
-- exe 로 실행할 때(chzzkControl.exe): exe 가 있는 폴더 = 프로그램 폴더
+- exe 로 실행할 때(BangsongHelper.exe): exe 가 있는 폴더 = 프로그램 폴더
   (exe 안의 파일들은 실행할 때마다 바뀌는 임시 폴더에 풀려서, 거기에 저장하면 끄는 순간 사라져요!)
 """
 

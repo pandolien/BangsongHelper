@@ -140,7 +140,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("치지직 방송 도우미")
+        self.setWindowTitle("방송 도우미")
         self.resize(1280, 820)
 
         self.objThreadPool = QThreadPool.globalInstance()
@@ -1716,7 +1716,7 @@ class MainWindow(QMainWindow):
     def _UpdateStreamButton(self, nPending: int, nMissions: int) -> None:
         """창 제목에 후원 대기 · 미션 수를 보여줘요. (작업 표시줄에서도 보여요)"""
         listParts = ([f"대기 {nPending}"] if nPending else []) + ([f"미션 {nMissions}"] if nMissions else [])
-        self.setWindowTitle("치지직 방송 도우미" + (f" ({' · '.join(listParts)})" if listParts else ""))
+        self.setWindowTitle("방송 도우미" + (f" ({' · '.join(listParts)})" if listParts else ""))
 
     def closeEvent(self, objEvent) -> None:  # noqa: N802 (Qt 가 정한 이름)
         """메인 창을 닫으면 방송 도우미 창도 닫고 연결도 끊어요."""

@@ -2,7 +2,7 @@
 방송 도우미 창 (채팅 + 후원 목록 + 미션을 한 화면에)
 =====================================================
 
-    ┌───────────── 치지직 방송 도우미 ─────────────┐
+    ┌──────────────── 방송 도우미 ────────────────┐
     │ 10:00 [미션 진행 중] ...   (항상 보여요)       │
     ├──────────────┬───────────────────────────────┤
     │              │ 후원 목록 (대기 2)              │
@@ -40,7 +40,7 @@ class StreamToolsWindow(QWidget):
     def __init__(self, objHub: ChatHub, objChatView: ChatWindow, objDonationView: DonationWindow,
                  objMissionView: MissionWindow, objParent: Optional[QWidget] = None):
         super().__init__(objParent, Qt.WindowType.Window)
-        self.setWindowTitle("치지직 방송 도우미")
+        self.setWindowTitle("방송 도우미")
         self.resize(1240, 820)
         self.objHub = objHub
         self.objChatView = objChatView

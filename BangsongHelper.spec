@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller 설정 파일 — build_exe.bat 이 이걸로 exe 를 만들어요.
-# 결과: dist\chzzkControl\chzzkControl.exe (+ _internal 폴더, data 폴더)
+# 결과: dist\BangsongHelper\BangsongHelper.exe (+ _internal 폴더, data 폴더)
 
 a = Analysis(
     ['main.py'],
@@ -23,7 +23,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='chzzkControl',
+    name='BangsongHelper',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -37,5 +37,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='chzzkControl',
+    name='BangsongHelper',
 )

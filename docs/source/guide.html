@@ -2,15 +2,15 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>chzzkControl 사용 안내</title>
-<meta name="author" content="chzzkControl">
+<title>방송 도우미 사용 안내</title>
+<meta name="author" content="BangsongHelper">
 <style>
-  /* 이 파일을 고친 뒤 build_pdf.bat 을 실행하면 ../chzzkControl_정리.pdf 가 다시 만들어져요.
+  /* 이 파일을 고친 뒤 build_pdf.bat 을 실행하면 ../BangsongHelper_정리.pdf 가 다시 만들어져요.
      스크린샷은 make_screenshots.py 로 다시 만들 수 있어요. (가짜 데이터로 찍어요) */
   @page {
     size: A4;
     margin: 20mm 18mm 15mm 18mm;
-    @top-left { content: "chzzkControl 사용 안내"; font: 9pt "Malgun Gothic"; color: #6b7280;
+    @top-left { content: "방송 도우미 (BangsongHelper) 사용 안내"; font: 9pt "Malgun Gothic"; color: #6b7280;
                 border-bottom: 0.6pt solid #d1d5db; vertical-align: bottom; padding-bottom: 3pt; width: 100%; margin-bottom: 6pt; }
     @bottom-center { content: "- " counter(page) " -"; font: 9pt "Malgun Gothic"; color: #9ca3af; }
   }
@@ -59,8 +59,9 @@
 </head>
 <body>
 
-<h1 class="title">chzzkControl 사용 안내</h1>
+<h1 class="title">방송 도우미 사용 안내</h1>
 <p class="subtitle">스팀 · 치지직 연동 방송 도우미 — 실시간 채팅 · 후원 / 미션 관리 · 카테고리 자동 변경</p>
+<p class="note" style="text-align:center">※ 치지직(CHZZK) · 네이버 · 스팀의 공식 프로그램이 아닌 개인이 만든 비공식 도구입니다. (치지직 공식 Open API 사용, 방송 상태 확인만 웹사이트 주소 보조 사용)</p>
 
 <ol class="toc">
   <li>설치하기</li>
@@ -87,7 +88,7 @@
 
 <h3>설치 순서</h3>
 <ol>
-  <li><b>chzzkControl 폴더</b>를 원하는 곳에 두기 (압축 파일이면 압축 풀기) — 예: <code>D:\chzzkControl</code></li>
+  <li><b>BangsongHelper 폴더</b>를 원하는 곳에 두기 (압축 파일이면 압축 풀기) — 예: <code>D:\BangsongHelper</code></li>
   <li><b>install.bat</b> 더블클릭 (처음 한 번만, 몇 분 걸림)</li>
   <li><b>Setup complete</b> 나오면 설치 끝</li>
   <li><b>run.bat</b> 더블클릭 → 프로그램 실행 (설치 전에 눌러도 설치부터 진행됨) → <b>3장</b>으로</li>
@@ -187,7 +188,8 @@ Setup complete. Now run run.bat</pre>
     <tr><td>SteamID64</td><td>7656119… 17자리 숫자</td>
         <td><a href="https://store.steampowered.com/account/">store.steampowered.com/account</a> → 맨 위 'Steam ID'</td></tr>
     <tr><td>Client ID</td><td>치지직 앱 Client ID</td>
-        <td><a href="https://developers.chzzk.naver.com">developers.chzzk.naver.com</a> → 애플리케이션 등록 후 앱 화면</td></tr>
+        <td><a href="https://developers.chzzk.naver.com">developers.chzzk.naver.com</a> → 애플리케이션 등록 후 앱 화면<br>
+            <b>※ 앱 ID · 이름에 chzzk · 치지직 · naver · 네이버 넣지 않기</b> (등록 불가 · 정지될 수 있음)</td></tr>
     <tr><td>Client Secret</td><td>치지직 앱 Client Secret</td>
         <td>위와 같은 화면 — <b>절대 공개 금지</b></td></tr>
     <tr><td>채널 ID</td><td>내 방송국 주소 뒤 32자리</td>
@@ -306,7 +308,7 @@ Setup complete. Now run run.bat</pre>
     <tr><td>연결</td><td>[연결 / 연결 끊기] · 끊기면 자동 재연결 (3초 → 6초 → … 최대 60초)</td></tr>
     <tr><td>미션 타이머 줄</td><td>채팅 위에 진행 중 미션 항상 표시 (8장)</td></tr>
     <tr><td>크기 조절</td><td>경계선(가운데 세로 · 오른쪽 가로) 끌기</td></tr>
-    <tr><td>창 제목</td><td>'치지직 방송 도우미 (대기 3 · 미션 2)' → 작업 표시줄에서도 확인</td></tr>
+    <tr><td>창 제목</td><td>'방송 도우미 (대기 3 · 미션 2)' → 작업 표시줄에서도 확인</td></tr>
   </tbody>
 </table>
 <div class="box info"><b>후원 받기 자동 시작</b>: 로그인돼 있으면 켜자마자 후원 · 미션 기록<br>

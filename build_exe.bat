@@ -3,9 +3,9 @@ setlocal
 cd /d "%~dp0"
 
 rem ==========================================================================
-rem  Build chzzkControl.exe (PyInstaller)
-rem    Result: dist\chzzkControl\chzzkControl.exe
-rem            dist\chzzkControl\data\  (init_upload.json, game_map.txt only)
+rem  Build BangsongHelper.exe (PyInstaller)
+rem    Result: dist\BangsongHelper\BangsongHelper.exe
+rem            dist\BangsongHelper\data\  (init_upload.json, game_map.txt only)
 rem    Your data\init.json (keys / tokens) is NEVER copied.
 rem  NOTE: keep this file ASCII only. Korean text breaks cmd.exe parsing.
 rem ==========================================================================
@@ -21,11 +21,11 @@ echo [1/3] Installing PyInstaller...
 if errorlevel 1 goto :Error
 
 echo [2/3] Building exe... (takes a minute)
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean chzzkControl.spec
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean BangsongHelper.spec
 if errorlevel 1 goto :Error
 
 echo [3/3] Copying data templates and docs...
-set "OUT=dist\chzzkControl"
+set "OUT=dist\BangsongHelper"
 if not exist "%OUT%\data" mkdir "%OUT%\data"
 copy /y "data\init_upload.json" "%OUT%\data\" > nul
 copy /y "data\game_map.txt" "%OUT%\data\" > nul
@@ -34,7 +34,7 @@ copy /y "docs\*.pdf" "%OUT%\" > nul
 
 echo.
 echo ============================================
-echo   Done: %OUT%\chzzkControl.exe
+echo   Done: %OUT%\BangsongHelper.exe
 echo   Zip the whole "%OUT%" folder to share it.
 echo ============================================
 if /i not "%~1"=="/nopause" pause
