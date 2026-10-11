@@ -1,0 +1,56 @@
+{
+  "steam": {
+    "api_key": "",
+    "steam_id": ""
+  },
+  "youtube": {
+    "api_key": "",
+    "default_target": "",
+    "min_interval_sec": 8
+  },
+  "chzzk": {
+    "client_id": "",
+    "client_secret": "",
+    "channel_id": "",
+    "redirect_uri": "http://localhost:8080/callback",
+    "access_token": "",
+    "refresh_token": "",
+    "token_expire_at": 0
+  },
+  "urls": {
+    "steam": {
+      "player_summaries": "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
+    },
+    "youtube": {
+      "data_api_base": "https://www.googleapis.com/youtube/v3"
+    },
+    "chzzk": {
+      "open_api_base": "https://openapi.chzzk.naver.com",
+      "service_api_base": "https://api.chzzk.naver.com",
+      "authorize": "https://chzzk.naver.com/account-interlock",
+      "live_detail": "/service/v2/channels/{channelId}/live-detail",
+      "lives": "/open/v1/lives",
+      "channels": "/open/v1/channels",
+      "category_search": "/open/v1/categories/search",
+      "token": "/auth/v1/token",
+      "token_revoke": "/auth/v1/token/revoke",
+      "live_setting": "/open/v1/lives/setting",
+      "chat_send": "/open/v1/chats/send",
+      "chat_notice": "/open/v1/chats/notice",
+      "chat_settings": "/open/v1/chats/settings",
+      "session_auth": "/open/v1/sessions/auth",
+      "session_subscribe_chat": "/open/v1/sessions/events/subscribe/chat",
+      "session_subscribe_donation": "/open/v1/sessions/events/subscribe/donation",
+      "chat_blind": "/open/v1/chats/blind-message",
+      "temporary_restrict": "/open/v1/temporary-restrict-channels",
+      "restrict": "/open/v1/restrict-channels"
+    }
+  },
+  "app": {
+    "refresh_interval_sec": 30,
+    "auto_sync_category": false,
+    "auto_donation": true,
+    "auto_fallback_various": true,
+    "auto_detect_folder_games": true
+  }
+}

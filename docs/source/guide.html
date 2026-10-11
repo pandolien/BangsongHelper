@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>chzzkControl 사용 안내</title>
+<meta name="author" content="chzzkControl">
+<style>
+  /* 이 파일을 고친 뒤 build_pdf.bat 을 실행하면 ../chzzkControl_정리.pdf 가 다시 만들어져요.
+     스크린샷은 make_screenshots.py 로 다시 만들 수 있어요. (가짜 데이터로 찍어요) */
+  @page {
+    size: A4;
+    margin: 20mm 18mm 15mm 18mm;
+    @top-left { content: "chzzkControl 사용 안내"; font: 9pt "Malgun Gothic"; color: #6b7280;
+                border-bottom: 0.6pt solid #d1d5db; vertical-align: bottom; padding-bottom: 3pt; width: 100%; margin-bottom: 6pt; }
+    @bottom-center { content: "- " counter(page) " -"; font: 9pt "Malgun Gothic"; color: #9ca3af; }
+  }
+  :root { --green: #00a86b; --dark: #1f2937; --link: #b45309; --gray: #6b7280; --line: #d1d5db; --alt: #f3f4f6; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: "Malgun Gothic", sans-serif; font-size: 11pt; line-height: 1.55; color: var(--dark); background: #fff; }
+  h1.title { text-align: center; font-size: 24pt; margin: 4pt 0 0; line-height: 1.3; }
+  p.subtitle { text-align: center; color: var(--gray); font-size: 11pt; margin: 2pt 0 10pt; }
+  h2 { color: var(--green); font-size: 18pt; margin: 6pt 0 6pt; }
+  h3 { font-size: 13pt; margin: 11pt 0 4pt; }
+  h2, h3 { break-after: avoid; }
+  .page { break-before: page; }
+  ol, ul { margin: 4pt 0 8pt; padding-left: 22pt; }
+  li { margin: 1pt 0; }
+  a { color: var(--link); font-weight: bold; text-decoration: none; }
+  code { font-family: Consolas, "Malgun Gothic", monospace; font-size: 10pt; background: #f3f4f6; padding: 0 2pt; }
+  figure { margin: 8pt 0 10pt; text-align: center; break-inside: avoid; }
+  figure img { width: 100%; max-height: 90mm; object-fit: contain; border: 0.6pt solid var(--line); }
+  figure.small img { width: auto; max-width: 100%; max-height: 40mm; }
+  figcaption { color: var(--gray); font-size: 10pt; margin-top: 3pt; }
+  table { width: 100%; border-collapse: collapse; font-size: 10pt; line-height: 1.45; margin: 6pt 0; }
+  th { background: var(--green); color: #fff; text-align: left; padding: 4pt 6pt; }
+  td { border: 0.6pt solid var(--line); padding: 4pt 6pt; vertical-align: top; }
+  tr { break-inside: avoid; }
+  tbody tr:nth-child(even) td { background: var(--alt); }
+  .note { font-size: 10pt; color: var(--gray); margin: 2pt 0 8pt; }
+  .box { padding: 7pt 12pt; margin: 8pt 0; font-size: 10.5pt; break-inside: avoid; }
+  .box.info { background: #eef4ff; border-left: 4pt solid #3b82f6; }
+  .box.warn { background: #fff7ed; border-left: 4pt solid #f59e0b; }
+  .box.ok { background: #ecfdf5; border-left: 4pt solid #10b981; }
+  pre.console { background: #111827; color: #e5e7eb; font: 9.5pt/1.5 Consolas, monospace; padding: 8pt 12pt; margin: 6pt 0 10pt; white-space: pre-wrap; break-inside: avoid; }
+  pre.console .dim { color: #9ca3af; }
+  pre.layout { font: 9.5pt/1.35 Consolas, "Malgun Gothic", monospace; background: #f9fafb; border: 0.6pt solid var(--line); padding: 8pt 12pt; margin: 6pt 0; break-inside: avoid; }
+  .two-col { display: flex; gap: 14pt; align-items: flex-start; }
+  .two-col > figure { flex: 0 0 34%; margin-top: 0; }
+  .two-col > div { flex: 1; }
+  .toc { columns: 2; column-gap: 20pt; font-size: 11pt; margin: 4pt 0 6pt; padding-left: 20pt; }
+  .new { display: inline-block; background: #00a86b; color: #fff; font-size: 8pt; font-weight: bold; padding: 0 4pt; border-radius: 3pt; vertical-align: middle; }
+</style>
+</head>
+<body>
+
+<h1 class="title">chzzkControl 사용 안내</h1>
+<p class="subtitle">스팀 · 치지직 연동 방송 도우미 — 카테고리 자동 변경 · 실시간 채팅 · 후원 / 미션 관리</p>
+
+<ol class="toc">
+  <li>설치하기</li>
+  <li>설정 넣기</li>
+  <li>게임 ↔ 카테고리 자동 연동</li>
+  <li>방송 도우미 (한 화면)</li>
+  <li>유튜브 채팅 같이 보기</li>
+  <li>후원 목록</li>
+  <li>미션 &amp; 타이머</li>
+  <li>시청자 관리</li>
+  <li>테스트 도구 &amp; 문제 해결</li>
+  <li>알아두면 좋은 점</li>
+</ol>
+
+<!-- ===================================================================== -->
+<h2>1. 설치하기</h2>
+<p>파이썬을 몰라도 됩니다. <b>run.bat</b> 하나가 필요한 것을 알아서 설치합니다.</p>
+<div class="box info"><b>준비물</b>: Windows 10 / 11 컴퓨터와 인터넷(처음 설치할 때만). 파이썬은 <b>없어도 됩니다</b> — 없으면 Python 3.12 를 자동으로 설치합니다. (관리자 권한 필요 없음)</div>
+
+<h3>설치 순서</h3>
+<ol>
+  <li>받은 <b>chzzkControl 폴더</b>(압축 파일이면 압축을 푼 폴더)를 원하는 곳에 둡니다. 예: <code>D:\chzzkControl</code></li>
+  <li>폴더 안의 <b>run.bat</b> 을 더블클릭합니다.</li>
+  <li>검은 창이 뜨고 아래 순서로 설치가 진행됩니다. 처음 한 번은 <b>몇 분</b> 걸립니다.</li>
+  <li><b>Setup complete</b> 가 나오면 잠시 뒤 프로그램 창이 열립니다. → <b>2. 설정 넣기</b> 로 넘어가세요.</li>
+  <li>다음부터는 <b>run.bat</b> 더블클릭만 하면 바로 열립니다. (설치만 다시 하려면 <b>install.bat</b>)</li>
+</ol>
+<pre class="console">[1/4] Looking for Python...                    <span class="dim">← 파이썬 찾기</span>
+[2/4] Installing Python 3.12.10 ...            <span class="dim">← 없을 때만 자동 설치</span>
+[3/4] Preparing virtual environment (.venv)... <span class="dim">← .venv 폴더 만들기</span>
+[4/4] Installing libraries...                  <span class="dim">← 라이브러리 설치</span>
+Setup complete. Now run run.bat</pre>
+
+<h3>설치가 안 될 때</h3>
+<table>
+  <thead><tr><th style="width:40%">검은 창에 보이는 것</th><th>해결</th></tr></thead>
+  <tbody>
+    <tr><td>Windows의 PC를 보호했습니다 (파란 창)</td><td>[추가 정보] → [실행] 을 누릅니다.</td></tr>
+    <tr><td>[ERROR] Python installation failed.</td><td><a href="https://www.python.org/downloads/">https://www.python.org/downloads/</a> 에서 파이썬을 설치합니다. 첫 화면에서 <b>Add python.exe to PATH</b> 를 꼭 체크한 뒤 run.bat 을 다시 실행합니다.</td></tr>
+    <tr><td>[ERROR] Could not download …<br>[ERROR] Library installation failed.</td><td>인터넷 연결을 확인하고 run.bat 을 다시 실행합니다.</td></tr>
+    <tr><td>설치는 됐는데 프로그램이 이상하게 꺼짐</td><td>프로그램 폴더의 <b>.venv</b> 폴더를 지우고 run.bat 을 다시 실행하면 처음부터 새로 설치합니다.</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================================================================== -->
+<section class="page">
+<h2>2. 설정 넣기</h2>
+<ol>
+  <li>위쪽 <b>[설정]</b> 탭에서 아래 표의 값을 칸마다 붙여넣고 <b>[저장]</b> → <code>data/init.json</code> 에 저장됩니다.</li>
+  <li><b>[방송 관리]</b> 탭 → <b>[치지직 로그인]</b> → 브라우저에서 <b>동의</b>.</li>
+</ol>
+<figure>
+  <img src="img/settings_tab.png" alt="설정 탭">
+  <figcaption>[설정] 탭 (그림의 값은 예시예요)</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th style="width:16%">설정 칸</th><th style="width:24%">넣을 값</th><th>어디서 얻나요?</th></tr></thead>
+  <tbody>
+    <tr><td>API 키</td><td>스팀 API 키 (32자리)<br><span class="note">없어도 됨 <span class="new">NEW</span></span></td>
+        <td><a href="https://steamcommunity.com/dev/apikey">https://steamcommunity.com/dev/apikey</a><br>로그인 → Domain Name 에 localhost → 동의 → Register</td></tr>
+    <tr><td>SteamID64</td><td>7656119 로 시작하는 17자리 숫자</td>
+        <td><a href="https://store.steampowered.com/account/">https://store.steampowered.com/account/</a><br>맨 위 'Steam ID: …'</td></tr>
+    <tr><td>Client ID</td><td>치지직 앱 Client ID</td>
+        <td><a href="https://developers.chzzk.naver.com">https://developers.chzzk.naver.com</a><br>→ 애플리케이션 등록 후 앱 화면</td></tr>
+    <tr><td>Client Secret</td><td>치지직 앱 Client Secret</td>
+        <td>위와 같은 화면. <b>절대 남에게 보여주지 않기</b></td></tr>
+    <tr><td>채널 ID</td><td>내 방송국 주소 뒤 32자리</td>
+        <td><a href="https://chzzk.naver.com">https://chzzk.naver.com</a> → 내 채널 → 주소창의 https://chzzk.naver.com/ 뒤</td></tr>
+    <tr><td>유튜브 API 키</td><td>Google Cloud API 키<br><span class="note">유튜브 채팅용, 없어도 됨 <span class="new">NEW</span></span></td>
+        <td><a href="https://console.cloud.google.com">https://console.cloud.google.com</a> → 5장 참고</td></tr>
+    <tr><td>리디렉션 URL</td><td>http://localhost:8080/callback</td>
+        <td>기본값 그대로. 개발자 센터에 등록한 주소와 <b>똑같아야</b> 함</td></tr>
+  </tbody>
+</table>
+<p class="note">스팀 API 키가 없으면 스팀 게임은 감지하지 않고, <b>실행 중인 프로그램</b>(롤 · 발로란트 등)으로만 게임을 알아봐요.</p>
+
+<h3>치지직 개발자 센터 — API Scope(권한)</h3>
+<p>앱의 <b>로그인 리디렉션 URL</b> 은 <a href="http://localhost:8080/callback">http://localhost:8080/callback</a>. 아래 권한을 <b>모두 체크</b>하면 모든 기능을 쓸 수 있어요.</p>
+<table>
+  <thead><tr><th style="width:42%">권한</th><th>쓰이는 곳</th></tr></thead>
+  <tbody>
+    <tr><td>채널 조회, 라이브 조회, 카테고리 조회</td><td>대시보드 방송 상태, 카테고리 검색 · 자동 짝 찾기</td></tr>
+    <tr><td>방송 설정 조회 / 변경</td><td>방송 제목 · 카테고리 바꾸기</td></tr>
+    <tr><td>채팅 메시지 조회</td><td>실시간 채팅 (방송 도우미)</td></tr>
+    <tr><td>채팅 메시지 쓰기, 채팅 공지 등록</td><td>채팅 보내기, 공지, 메시지 가리기</td></tr>
+    <tr><td><b>후원 조회</b></td><td><b>후원 목록 · 미션 자동 등록</b> — 이게 없으면 후원이 하나도 안 들어와요!</td></tr>
+    <tr><td>활동제한 쓰기 / 조회 <span class="new">NEW</span></td><td>임시 제한 · 활동 제한 · 제한 목록</td></tr>
+  </tbody>
+</table>
+<div class="box warn"><b>권한을 나중에 추가했다면?</b> 프로그램에서 <b>[로그아웃] → [치지직 로그인]</b> 을 다시 해야 새 권한이 적용됩니다. 브라우저 동의 화면에 새 권한이 보이는지 확인하세요.</div>
+<div class="box info"><b>스팀 준비</b>: 스팀 → 프로필 편집 → 개인 정보 설정에서 <b>내 프로필</b>, <b>게임 세부 정보</b>를 <b>공개</b>로 해야 지금 하는 게임이 보입니다.</div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2>3. 게임 ↔ 카테고리 자동 연동</h2>
+<p>게임을 켜면 치지직 방송 카테고리를 <b>알아서</b> 바꿔줘요. 스팀과 치지직은 같은 게임도 이름이 달라서
+(예: 스팀 <b>ELDEN RING NIGHTREIGN</b> = 치지직 <b>ELDEN RING 밤의 통치자</b>) 게임마다 <b>짝</b>을 지어 기억해요.</p>
+
+<h3>켜는 법</h3>
+<ol>
+  <li><b>[방송 관리]</b> → ② 카테고리 → <b>'게임이 바뀌면 자동으로 맞추기'</b> 체크</li>
+  <li><b>[대시보드]</b> → <b>'자동 새로고침'</b> 체크 (30초마다 지금 하는 게임을 확인)</li>
+</ol>
+<div class="box warn"><b>주의</b>: 자동 맞추기가 켜져 있으면 프로그램을 켜자마자 카테고리가 바뀔 수 있어요. 켜 둔 게임과 다른 방송을 할 때는 꺼 두세요.</div>
+<figure>
+  <img src="img/dashboard_tab.png" alt="대시보드" style="max-height:72mm">
+  <figcaption>[대시보드] — '지금 하는 게임' 칸에 감지된 게임과 치지직 짝이 보여요</figcaption>
+</figure>
+
+<h3>게임을 알아보는 방법 <span class="new">NEW</span></h3>
+<table>
+  <thead><tr><th style="width:26%">방법</th><th>설명</th></tr></thead>
+  <tbody>
+    <tr><td><b>스팀</b></td><td>스팀에서 '플레이 중' 인 게임. 게임 PC 와 방송 PC 가 달라도 돼요. (스팀 서버에 물어봐요)</td></tr>
+    <tr><td><b>실행 중인 프로그램</b></td><td>스팀 밖 게임(롤 · 발로란트 · 메이플 · 로아 · 오버워치 · 디아블로 4 등)은 내 PC 에서 실행 중인 프로그램(exe)으로 알아봐요.</td></tr>
+    <tr><td><b>게임 설치 폴더</b> <span class="new">NEW</span></td><td>목록에 없는 게임도 알아봐요. 에픽 · 넥슨 · 엑스박스 · 라이엇 · GOG 등 <b>게임 설치 폴더에서 실행된 프로그램</b>을 게임으로 보고, <b>창 제목</b>으로 카테고리를 자동 검색해요. (런처 · 업데이트 · 안티치트는 제외, ② 카테고리의 '목록에 없는 게임도 알아보기' 로 끄고 켜기)</td></tr>
+    <tr><td><b>게임 아닌 프로그램은 무시</b></td><td>Wallpaper Engine · <b>OBS Studio</b> · Crosshair X · Bongo Cat 은 스팀에 '플레이 중' 으로 떠도 카테고리를 안 바꿔요.</td></tr>
+  </tbody>
+</table>
+
+<h3>짝이 없는 게임은? → 자동으로 찾아요 <span class="new">NEW</span></h3>
+<ol>
+  <li>스팀 상점의 <b>한국어 이름</b>으로 검색 (예: TEKKEN 8 → <b>철권 8</b>)</li>
+  <li>내장 <b>한국어 이름 목록</b>(약 115개)으로 검색 (예: Counter-Strike 2 → <b>카운터 스트라이크 2</b>)</li>
+  <li>이름이 <b>똑같은</b> 카테고리가 있으면 → 짝으로 저장하고 바로 적용 (다음부터는 검색 없이 바로)</li>
+  <li>못 찾으면 → <b>'종합 게임'</b> 으로 (짝으로 저장하지는 않아요. ② 카테고리의 체크박스로 끄고 켜기)</li>
+</ol>
+<div class="box ok">짝 목록에는 <b>스팀 동시접속자 상위 100개 중 89개</b>(게임 아닌 4개 · 치지직에 없는 7개 빼고 전부)와 스팀 밖 인기 게임이 미리 들어 있어요. (총 105개)</div>
+
+<h3>짝을 직접 만들거나 고치기</h3>
+<ul>
+  <li><b>[방송 관리] → [지금 게임으로 맞추기]</b>: 자동으로 못 찾으면 후보 + '종합 게임' 이 목록에 나와요 → 골라서 <b>[카테고리 적용]</b> → 짝 자동 저장</li>
+  <li><b>[게임 짝]</b> 탭: <b>[지금 하는 게임 불러오기]</b> 또는 <b>[실행 중인 프로그램에서 고르기]</b> → 카테고리 검색 → <b>[짝 저장]</b>. 줄을 누르면 수정, [선택한 짝 삭제] 로 삭제</li>
+</ul>
+<figure>
+  <img src="img/gamemap_tab.png" alt="게임 짝 탭" style="max-height:72mm">
+  <figcaption>[게임 짝] — 스팀 gameid 또는 프로그램 이름(exe)으로 짝을 지어요</figcaption>
+</figure>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2>4. 방송 도우미 (채팅 + 후원 + 미션 한 화면) <span class="new">NEW</span></h2>
+<p><b>[대시보드] → [방송 도우미]</b> 를 누르면 방송 중에 필요한 것이 한 화면에 나와요.</p>
+<figure>
+  <img src="img/stream_window.png" alt="방송 도우미" style="max-height:110mm">
+  <figcaption>방송 도우미 — 왼쪽 채팅, 오른쪽 위 후원 목록, 오른쪽 아래 미션</figcaption>
+</figure>
+<ul>
+  <li><b>왼쪽 실시간 채팅</b>: 스트리머 / 매니저 딱지, 닉네임별 색, 후원은 노란 줄. 아래 칸에 쓰고 Enter → 채팅 보내기 (100자)</li>
+  <li><b>항상 위</b>: 창 전체가 게임 위에 떠 있어요. <b>자동 스크롤</b> · <b>시간</b> · <b>글자 크기</b> · <b>지우기</b></li>
+  <li>연결 상태와 <b>[연결 / 연결 끊기]</b> 는 채팅 위쪽에. 인터넷이 끊기면 3초 → 6초 → … 최대 60초 간격으로 자동 재연결</li>
+  <li>경계선(가운데 세로 · 오른쪽 가로)을 끌어서 크기 조절. 대시보드 버튼에 <b>'방송 도우미 (대기 3 · 미션 2)'</b> 처럼 숫자가 보여요.</li>
+</ul>
+<div class="box info"><b>후원 받기 자동 시작</b>: 프로그램을 켜고 로그인돼 있으면 방송 도우미를 안 열어도 후원 · 미션이 기록돼요.
+끄려면 <b>[방송 관리] → ③ 채팅 → '프로그램을 켜면 후원 받기 자동 시작'</b> 체크 해제.</div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2>5. 유튜브 채팅 같이 보기 <span class="new">NEW</span></h2>
+<p>치지직 + 유튜브 <b>동시 송출</b>할 때, 방송 도우미 채팅창에 유튜브 채팅도 <b>[YT]</b> 로 섞어서 보여줘요.
+<b>유튜브 공식 Data API</b> 를 써서 안정적이에요. (구글 계정 로그인 연동은 필요 없고, API 키만 있으면 돼요)</p>
+<h3>API 키 발급 (한 번만, 무료)</h3>
+<ol>
+  <li><a href="https://console.cloud.google.com">https://console.cloud.google.com</a> 에 구글 계정으로 로그인 → 위쪽에서 <b>새 프로젝트</b> 만들기</li>
+  <li><b>API 및 서비스 → 라이브러리</b> → <code>YouTube Data API v3</code> 검색 → <b>사용</b></li>
+  <li><b>API 및 서비스 → 사용자 인증 정보 → 사용자 인증 정보 만들기 → API 키</b> → 만들어진 키 복사</li>
+  <li>(권장) 그 키의 <b>API 제한사항</b> 에서 <code>YouTube Data API v3</code> 만 허용</li>
+  <li>프로그램 <b>[설정] → 유튜브 → API 키</b> 에 붙여넣고 <b>[저장]</b></li>
+</ol>
+<h3>쓰는 법</h3>
+<ul>
+  <li>방송 도우미 채팅창 위의 <b>[YT] 칸</b>에 <b>유튜브 방송 주소</b>(예: <code>https://www.youtube.com/live/xxxxxxxxxxx</code>)를 넣고 <b>[유튜브 연결]</b></li>
+  <li><b>슈퍼챗</b>은 노란 줄로 보이고 <b>후원 목록('유튜브')</b> 에 들어가요. "미션" 으로 시작하면 <b>미션</b>으로도 등록돼요.</li>
+  <li>마지막에 넣은 주소는 기억해 둬요. 방송 도우미 창을 닫으면 유튜브 연결도 끊겨요. (사용량 아끼기)</li>
+  <li><code>@채널이름</code> 만 넣어도 지금 방송 중인 영상을 찾지만, 사용량이 100점 들어서 방송 주소를 추천해요. 유튜브로 채팅 보내기는 안 돼요.</li>
+</ul>
+<div class="box warn"><b>하루 사용량</b>: 구글 프로젝트마다 하루 <b>10,000점</b>, 채팅을 한 번 가져올 때 <b>5점</b>. 한국 시간 <b>오후 4~5시쯤</b> 다시 채워져요.
+<b>[설정] → 채팅 가져오는 간격</b>(기본 8초 ≈ 하루 약 4시간)으로 조절하고, 채팅창의 유튜브 줄에서 <b>오늘 사용량</b>을 확인하세요.
+방송이 더 길면 Google Cloud 에서 할당량 증가 신청(무료)을 할 수 있어요.</div>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2>6. 후원 목록 <span class="new">NEW</span></h2>
+<p>영상 · 채팅 후원을 표로 모아 보고, 한 줄씩 <b>대기 / 봄 / 넘김</b> 을 표시해서 대기열처럼 관리해요.</p>
+<table>
+  <thead><tr><th style="width:28%">기능</th><th>설명</th></tr></thead>
+  <tbody>
+    <tr><td>봄 표시 / 넘김 표시 / 대기로 되돌리기</td><td>여러 줄을 골라 한 번에. <b>더블클릭</b> = 대기 ↔ 봄. 끝난 줄은 흐리게</td></tr>
+    <tr><td>보기</td><td>전체 / 영상 후원만 / 미션 후원만 / 채팅 후원만, <b>대기만 보기</b>, <b>오늘만 보기</b></td></tr>
+    <tr><td>합계</td><td>영상 · 채팅(· 미션) 건수와 금액, 대기 건수</td></tr>
+    <tr><td>미션으로 만들기</td><td>고른 후원을 미션으로 등록 (7장)</td></tr>
+    <tr><td>치지직 스튜디오 열기</td><td>영상 재생 · 건너뛰기는 스튜디오에서 (치지직 API 에 제어 기능이 없어요)</td></tr>
+    <tr><td>저장</td><td><code>data/donations.json</code> 에 저장 → 껐다 켜도 목록과 봄 / 넘김이 남아요. 예전 후원은 날짜도 표시 (최근 3000건)</td></tr>
+  </tbody>
+</table>
+<h3>후원이 안 들어오면</h3>
+<p>창 위에 아래 같은 <b>빨간 경고</b>가 뜨면 개발자 센터에 <b>'후원 조회'</b> 권한이 없는 거예요. → 권한 체크 → <b>로그아웃 → 다시 로그인</b>.</p>
+<figure class="small"><img src="img/donation_warning.png" alt="후원 권한 경고"></figure>
+<p class="note">치지직 공식 API 는 영상 후원의 <b>제목만</b> 알려줘요. (영상 주소 · 재생 제어 없음) 또 지난 후원 내역을 주지 않아서, 프로그램이 꺼져 있던 동안의 후원은 가져올 수 없어요.</p>
+
+<!-- ===================================================================== -->
+<h2>7. 미션 &amp; 타이머 <span class="new">NEW</span></h2>
+<p>치지직 API 는 '미션 후원' 을 따로 알려주지 않아서, 들어오는 후원에서 미션을 골라내요.</p>
+<h3>미션이 등록되는 방법</h3>
+<ul>
+  <li><b>자동</b>: 후원 메시지가 <b>"미션"</b> 으로 시작하면 → 예) <code>미션: 노데스로 보스 잡기</code>, <code>[미션] 30분 안에 클리어</code></li>
+  <li><b>직접</b>: 후원 목록에서 <b>[미션으로 만들기]</b>, 또는 미션 칸의 <b>[미션 추가...]</b></li>
+</ul>
+<h3>타이머</h3>
+<ul>
+  <li>미션을 고르고 <b>[시작 / 재개]</b> → 제한 시간이 줄어들어요. <b>[일시정지]</b>, <b>[-1분] [+1분]</b>, 더블클릭 = 시작 ↔ 일시정지</li>
+  <li>시간이 끝나면 <b>'시간 초과'</b> + 소리 → <b>[성공] [실패] [거절]</b> 로 마무리. 시간 초과된 미션에 +1분을 누르면 다시 진행</li>
+  <li>방송 도우미 맨 위에 진행 중인 미션 타이머가 항상 보여요. 미션은 <code>data/missions.json</code> 에 저장 (진행 중이던 타이머도 이어져요)</li>
+</ul>
+<h3>설정 ([설정 열기])</h3>
+<figure class="small"><img src="img/mission_settings.png" alt="미션 설정"></figure>
+<p class="note">기본 제한 시간 · 시간 끝나면 소리 · <b>시작 / 결과를 채팅으로 알리기</b> · 자동 등록 단어(기본 "미션") · OBS 타이머 파일</p>
+
+<h3>방송 화면에 타이머 띄우기 (OBS)</h3>
+<ol>
+  <li>미션 설정의 <b>'OBS 용 타이머 파일 쓰기'</b> 체크 → <b>[경로 복사]</b></li>
+  <li>OBS → 소스 <b>[+]</b> → <b>텍스트 (GDI+)</b> → <b>'파일에서 읽기'</b> 체크 → 복사한 경로(<code>data\mission_timer.txt</code>) 선택</li>
+  <li>미션을 시작하면 방송 화면에 <code>[미션] 노데스로 보스 잡기 - 후원자C  07:17</code> 이 1초마다 바뀌어요.</li>
+</ol>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2>8. 시청자 관리 <span class="new">NEW</span></h2>
+<div class="two-col">
+  <figure><img src="img/chat_menu.png" alt="닉네임 메뉴"><figcaption>닉네임 메뉴</figcaption></figure>
+  <div>
+    <p>채팅에서 <b>닉네임을 누르거나 채팅 줄을 우클릭</b>하면 메뉴가 떠요.</p>
+    <table>
+      <thead><tr><th style="width:38%">메뉴</th><th>하는 일</th></tr></thead>
+      <tbody>
+        <tr><td>임시 제한</td><td>잠깐 채팅 금지. 시간은 치지직이 정해요 (처음 30초, 또 하면 60초 …)</td></tr>
+        <tr><td>임시 제한 풀기</td><td>바로 해제</td></tr>
+        <tr><td>이 메시지 가리기</td><td>그 채팅 한 줄을 가려요</td></tr>
+        <tr><td>활동 제한 (풀 때까지)</td><td>한 번 더 물어보고 제한</td></tr>
+        <tr><td>닉네임 복사</td><td>클립보드로 복사</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<ul>
+  <li>채팅 위쪽 <b>[제한 목록]</b>: 활동 제한한 시청자를 보고, 골라서 풀어줘요. (임시 제한은 금방 풀려서 목록에 안 나와요)</li>
+  <li>스트리머 본인 채팅에는 제한 메뉴가 안 나와요. 결과는 채팅에 <code>— 도배러 님을 임시 제한했어요 —</code> 처럼 표시돼요.</li>
+  <li>필요한 권한: <b>활동제한 쓰기 / 조회</b>, 가리기는 <b>채팅 메시지 쓰기</b>. 권한이 없으면 해결 방법이 채팅에 안내돼요.</li>
+</ul>
+
+<!-- ===================================================================== -->
+<h2>9. 테스트 도구 &amp; 문제 해결 <span class="new">NEW</span></h2>
+<div class="two-col">
+  <figure style="flex-basis:40%"><img src="img/test_dialog.png" alt="테스트 도구"><figcaption>후원 목록 → [테스트 도구]</figcaption></figure>
+  <div>
+    <ul>
+      <li><b>① 가짜 후원 · 채팅</b>: 영상 / 채팅 / 미션 후원, 채팅 한 줄을 내 프로그램 안에서만 보내 봐요. '(테스트)' 로 표시되고 저장 안 돼요.</li>
+      <li><b>② 실패 상황 흉내</b>: 후원 권한 없음 · 연결 끊김 → 다시 연결 · 연결 오류 · 로그인 풀림. <b>[원래 상태로]</b> 로 되돌려요.</li>
+      <li><b>③ 실제 연결 점검</b>: 치지직에 진짜로 접속해서 <b>로그인 → 접속 주소 → 채팅 받기 → 후원 받기</b> 를 [성공] / [실패] 로 보여줘요.
+        <b>후원이 안 들어오면 이것부터</b> 눌러 보세요.</li>
+    </ul>
+  </div>
+</div>
+<h3>이럴 땐</h3>
+<table>
+  <thead><tr><th style="width:42%">보이는 것</th><th>해결</th></tr></thead>
+  <tbody>
+    <tr><td>오류: 치지직 로그인이 필요해요</td><td>[방송 관리] 탭에서 [치지직 로그인]</td></tr>
+    <tr><td>오류 + 403 (채팅 메시지 조회 권한)</td><td>개발자 센터에서 '채팅 메시지 조회' 체크 → 로그아웃 → 다시 로그인</td></tr>
+    <tr><td>빨간 경고: 후원 알림을 받을 수 없어요</td><td>'후원 조회' 권한 체크 → 로그아웃 → 다시 로그인 (테스트 도구 ③ 으로 확인)</td></tr>
+    <tr><td>다시 연결 대기</td><td>인터넷이 잠깐 끊긴 것. 자동으로 다시 연결돼요 (인터넷이 끊겨도 로그인은 안 풀려요)</td></tr>
+    <tr><td>카테고리가 '종합 게임' 으로 바뀜</td><td>치지직에서 그 게임 카테고리를 못 찾은 것. [지금 게임으로 맞추기] 로 직접 고르거나 [게임 짝] 탭에서 짝 만들기</td></tr>
+    <tr><td>게임을 안 알아봄</td><td>스팀 프로필 · 게임 세부 정보 공개 확인. 스팀 밖 게임은 [게임 짝] → [실행 중인 프로그램에서 고르기]</td></tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ===================================================================== -->
+<section>
+<h2>10. 알아두면 좋은 점</h2>
+<h3>치지직 공식 API 로 안 되는 것</h3>
+<table>
+  <thead><tr><th style="width:36%">안 되는 것</th><th>대신</th></tr></thead>
+  <tbody>
+    <tr><td>영상 후원 재생 · 건너뛰기 · 광고 넘기기</td><td>치지직 스튜디오에서 직접. (유튜브 프리미엄 계정으로 OBS 브라우저에 로그인하면 광고가 안 나올 수 있어요)</td></tr>
+    <tr><td>영상 후원의 영상 주소</td><td>제목만 와요</td></tr>
+    <tr><td>미션 후원 따로 받기</td><td>후원 메시지가 "미션" 으로 시작하면 자동 등록 (7장)</td></tr>
+    <tr><td>지난 후원 내역 가져오기</td><td>프로그램이 받은 후원만 저장돼요 → '후원 받기 자동 시작' 을 켜 두세요</td></tr>
+    <tr><td>임시 제한 시간 정하기</td><td>치지직이 정해요 (30초 → 60초 …)</td></tr>
+  </tbody>
+</table>
+
+<h3>저장되는 파일 (data 폴더)</h3>
+<table>
+  <thead><tr><th style="width:30%">파일</th><th>내용</th></tr></thead>
+  <tbody>
+    <tr><td><code>init.json</code></td><td>설정 · 키 · 토큰 — <b>절대 공유하지 마세요</b> (깃허브에도 안 올라가요)</td></tr>
+    <tr><td><code>game_map.txt</code></td><td>게임 ↔ 카테고리 짝 목록 (메모장으로 고쳐도 돼요)</td></tr>
+    <tr><td><code>donations.json</code> · <code>missions.json</code></td><td>받은 후원 · 미션 기록</td></tr>
+    <tr><td><code>mission_timer.txt</code></td><td>OBS 용 미션 타이머 글자</td></tr>
+  </tbody>
+</table>
+
+<h3>그 밖에</h3>
+<ul>
+  <li>방송 상태는 치지직 웹사이트가 쓰는 비공식 주소로 먼저 확인하고, 안 되면 공식 라이브 목록에서 찾아요. 비공식 주소는 예고 없이 바뀔 수 있어요.</li>
+  <li>방송 설정 변경은 '기본 방송 설정' 을 바꾸는 것이라, 방송 중이면 현재 방송에도 바로 반영돼요.</li>
+  <li>스팀 API 는 하루 호출 횟수 제한이 있어서 자동 새로고침은 10초 이상(기본 30초)을 권장해요.</li>
+  <li>치지직은 한 사람당 실시간 채팅 연결을 3개까지만 허용해요. 프로그램은 연결 하나를 채팅 · 후원 · 미션이 나눠 써요.</li>
+  <li>터미널로도 쓸 수 있어요: <code>run.bat status</code>, <code>run.bat sync-game</code>, <code>run.bat chat "안녕하세요"</code> … (명령 목록은 README.md)</li>
+</ul>
+</section>
+
+</body>
+</html>

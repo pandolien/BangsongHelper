@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+data/init.json
+data/init.json.tmp
+data/donations.json
+data/donations.json.tmp
+data/missions.json
+data/missions.json.tmp
+data/mission_timer.txt
+build/
+dist/
+data/error.log
+data/youtube_quota.json

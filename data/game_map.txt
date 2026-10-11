@@ -1,0 +1,117 @@
+# ============================================================================
+#  스팀 게임 ↔ 치지직 카테고리 짝꿍 목록
+#
+#  한 줄 모양:
+#    스팀gameid = 카테고리종류 | 카테고리ID | 치지직카테고리이름   # 메모
+#
+#  - 스팀gameid      : 숫자 (프로그램 대시보드의 '플레이 중' 옆 ID)
+#  - 카테고리종류    : GAME / SPORTS / ETC 중 하나
+#  - 카테고리ID      : 치지직 카테고리 ID (프로그램에서 카테고리를 골라 적용하면 자동으로 채워져요)
+#  - 치지직카테고리이름 : 화면에 보여줄 이름 (비워도 됨)
+#  - '#' 뒤는 메모라서 무시돼요.
+# ============================================================================
+2622380 = GAME | Elden_Ring_Nightreign | ELDEN RING 밤의 통치자   # ELDEN RING NIGHTREIGN
+1778820 = GAME | TEKKEN8 | 철권 8   # TEKKEN 8
+1245620 = GAME | Elden_Ring | 엘든 링   # ELDEN RING
+1623730 = GAME | Palworld | 팰월드   # Palworld
+730 = GAME | Counter_Strike_Global_Offensive | 카운터 스트라이크 2   # Counter-Strike 2
+1086940 = GAME | Baldurs_Gate3 | 발더스 게이트 3   # Baldur's Gate 3
+553850 = GAME | HELLDIVERS2 | 헬다이버즈 2   # HELLDIVERS 2
+2358720 = GAME | Black_Myth_Wukong | 검은 신화: 오공   # Black Myth: Wukong
+578080 = GAME | Player_Unknowns_Battle_Grounds | PUBG: 배틀그라운드   # PUBG: BATTLEGROUNDS
+1599340 = GAME | Lost_Ark | 로스트아크   # Lost Ark
+1172470 = GAME | Apex_Legends | 에이펙스 레전드   # Apex Legends
+570 = GAME | Dota2 | 도타 2   # Dota 2
+271590 = GAME | Grand_Theft_Auto_V | Grand Theft Auto V   # Grand Theft Auto V
+2246340 = GAME | Monster_Hunter_Wilds | 몬스터 헌터 와일즈   # Monster Hunter Wilds
+413150 = GAME | Stardew_Valley | 스타듀 밸리   # Stardew Valley
+105600 = GAME | Terraria | 테라리아   # Terraria
+1966720 = GAME | Lethal_Company | 리썰 컴퍼니   # Lethal Company
+381210 = GAME | DEAD_BY_DAYLIGHT | 데드 바이 데이라이트   # Dead by Daylight
+252490 = GAME | Rust | 러스트   # Rust
+892970 = GAME | Valheim | 발헤임   # Valheim
+814380 = GAME | SEKIRO_SHADOWS_DIE_TWICE | 세키로: 섀도우 다이 트와이스   # Sekiro: Shadows Die Twice
+374320 = GAME | DARK_SOULS_III | 다크 소울 3   # DARK SOULS III
+367520 = GAME | Hollow_Knight | 할로우 나이트   # Hollow Knight
+2357570 = GAME | OVERWATCH | 오버워치   # Overwatch 2
+2767030 = GAME | Marvel_Rivals | 마블 라이벌즈   # Marvel Rivals
+1049590 = GAME | Black_Survival_Eternal_Return | 이터널 리턴   # Eternal Return
+2694490 = GAME | Path_of_Exile2 | 패스 오브 엑자일 2   # Path of Exile 2
+1144200 = GAME | Ready_or_Not | 레디 오어 낫   # Ready or Not
+2073850 = GAME | THE_FINALS | 더 파이널스   # THE FINALS
+1145360 = GAME | Hades | 하데스   # Hades
+1145350 = GAME | HADES2 | 하데스 2   # Hades II
+3241660 = GAME | REPO | R.E.P.O.   # R.E.P.O.
+exe:league of legends.exe = GAME | League_of_Legends | 리그 오브 레전드   # League of Legends
+exe:valorant-win64-shipping.exe = GAME | Valorant | 발로란트   # VALORANT
+exe:maplestory.exe = GAME | MapleStory | 메이플스토리   # MapleStory
+exe:overwatch.exe = GAME | OVERWATCH | 오버워치   # Overwatch
+exe:diablo iv.exe = GAME | Diablo_IV | 디아블로 4   # Diablo IV
+236390 = GAME | War_Thunder | 워 썬더   # War Thunder
+359550 = GAME | Rainbow_Six_Siege | 톰 클랜시의 레인보우 식스 시즈 X   # Tom Clancy's Rainbow Six Siege
+550 = GAME | Left4_Dead2 | 레프트 4 데드 2   # Left 4 Dead 2
+4126040 = GAME | Aniimo | 애니모   # Aniimo
+230410 = GAME | Warframe | 워프레임   # Warframe
+108600 = GAME | Project_Zomboid | 프로젝트 좀보이드   # Project Zomboid
+4001890 = GAME | How_to_Fish | 낚시 방법   # How to Fish
+227300 = GAME | Euro_Truck_Simulator2 | 유로 트럭 시뮬레이터 2   # Euro Truck Simulator 2
+1091500 = GAME | Cyberpunk2077 | 사이버펑크 2077   # Cyberpunk 2077
+1142710 = GAME | Total_War_WARHAMMER3 | 토탈 워: 워해머 3   # Total War: WARHAMMER III
+394360 = GAME | Hearts_of_Iron_IV | 하츠 오브 아이언 4   # Hearts of Iron IV
+322330 = GAME | Dont_Starve_Together | 돈 스타브 투게더   # Don't Starve Together
+1938090 = GAME | Call_of_Duty | 콜 오브 듀티   # Call of Duty®
+4000 = GAME | Garrys_Mod | 게리 모드   # Garry's Mod
+1364780 = GAME | Street_Fighter6 | 스트리트 파이터 6   # Street Fighter™ 6
+1085660 = GAME | Destiny_Guardians | 데스티니 가디언즈   # Destiny 2
+3678970 = GAME | TBH_Task_Bar_Hero | TBH: 태스크바 히어로   # TBH: Task Bar Hero
+739630 = GAME | Phasmophobia | 파스모포비아   # Phasmophobia
+945360 = GAME | Among_Us | 어몽 어스   # Among Us
+582010 = GAME | MONSTER_HUNTER_WORLD | 몬스터 헌터: 월드   # Monster Hunter: World
+3932890 = GAME | Escape_from_Tarkov | 이스케이프 프롬 타르코프   # Escape from Tarkov
+1326470 = GAME | Sons_Of_The_Forest | 선즈 오브 더 포레스트   # Sons Of The Forest
+1422450 = GAME | Deadlock | 데드락   # Deadlock
+1867240 = GAME | WARDOGS | 워독스   # WARDOGS
+1808500 = GAME | ARC_Raiders | 아크 레이더스   # ARC Raiders
+322170 = GAME | Geometry_Dash | 지오메트리 대시   # Geometry Dash
+2676230 = GAME | Grand_Theft_Auto_V | Grand Theft Auto V   # FiveM
+2868840 = GAME | Slay_the_Spire2 | 슬레이 더 스파이어 2   # Slay the Spire 2
+1304930 = GAME | The_Outlast_Trials | 아웃라스트 트라이얼   # The Outlast Trials
+292030 = GAME | The_Witcher3_Wild_Hunt | 더 위쳐 3: 와일드 헌트   # The Witcher 3: Wild Hunt — Remastered
+250900 = GAME | The_Binding_of_Isaac_Rebirth | 아이작의 번제: 리버스   # The Binding of Isaac: Rebirth
+1973530 = GAME | Limbus_Company | 림버스 컴퍼니   # Limbus Company
+2507950 = GAME | DeltaForce_HawkOps | 델타포스   # Delta Force
+440 = GAME | Team_Fortress2 | 팀 포트리스 2   # Team Fortress 2
+3240220 = GAME | Grand_Theft_Auto_V | Grand Theft Auto V   # Grand Theft Auto V Enhanced
+2807960 = GAME | Battlefield6 | 배틀필드 6   # Battlefield™ 6
+1203220 = GAME | NARAKA_BLADEPOINT | 나라카: 블레이드포인트   # NARAKA: BLADEPOINT
+3405690 = GAME | EA_SPORTS_FC26 | EA 스포츠 FC 26   # EA SPORTS FC™ 26
+1174180 = GAME | Red_Dead_Redemption2 | 레드 데드 리뎀션 2   # Red Dead Redemption 2
+632360 = GAME | Risk_of_Rain2 | 리스크 오브 레인 2   # Risk of Rain 2
+284160 = GAME | BeamNG_drive | 빔엔지.드라이브   # BeamNG.drive
+252950 = GAME | Rocket_League | 로켓 리그   # Rocket League®
+489830 = GAME | The_Elder_Scrolls_V_Skyrim | 엘더스크롤 5: 스카이림   # The Elder Scrolls V: Skyrim Special Edition
+1449850 = GAME | Yu_Gi_Oh_Master_Duel | 유희왕 마스터 듀얼   # Yu-Gi-Oh! Master Duel
+2483190 = GAME | Forza_Horizon6 | 포르자 호라이즌 6   # Forza Horizon 6
+4019220 = GAME | Dressmaker | 드레스메이커   # Dressmaker
+2183900 = GAME | Warhammer40k_Space_Marine2 | 워해머 40,000: 스페이스 마린 2   # Warhammer 40,000: Space Marine 2
+2300320 = GAME | Farming_Simulator25 | 파밍 시뮬레이터 25   # Farming Simulator 25
+244210 = GAME | Assetto_Corsa | 아세토 코르사   # Assetto Corsa
+291550 = GAME | Brawlhalla | 브롤할라   # Brawlhalla
+261550 = GAME | Mount_&_Blade2_Bannerlord | 마운트 앤 블레이드 2: 배너로드   # Mount & Blade II: Bannerlord
+1057090 = GAME | Ori_and_the_Will_of_the_Wisps | 오리와 도깨비불   # Ori and the Will of the Wisps
+294100 = GAME | Rimworld | 림월드   # RimWorld
+275850 = GAME | No_Man's_Sky | 노 맨즈 스카이   # No Man's Sky
+3513350 = GAME | WutheringWaves | 명조:워더링 웨이브   # Wuthering Waves
+1281930 = GAME | Terraria | 테라리아   # tModLoader
+960090 = GAME | Bloons_TD6 | 블룬스 TD 6   # Bloons TD 6
+1222670 = GAME | The_Sims4 | 더 심즈 4   # The Sims™ 4
+289070 = GAME | Sid_Meiers_Civilization_VI | 시드 마이어의 문명 VI   # Sid Meier’s Civilization® VI
+552990 = GAME | World_Of_Warships | 월드 오브 워쉽   # World of Warships
+594650 = GAME | Hunt_Showdown1896 | 헌트: 쇼다운 1896   # Hunt: Showdown 1896
+813780 = GAME | Age_of_Empires_II_Definitive_Edition | 에이지 오브 엠파이어 2: 디피니티브 에디션   # Age of Empires II: Definitive Edition
+2288340 = GAME | ACE_COMBAT8_WINGS_OF_THEVE | 에이스 컴뱃 8: 시브의 날개   # ACE COMBAT 8: WINGS OF THEVE
+1158310 = GAME | Crusader_Kings3 | 크루세이더 킹즈 3   # Crusader Kings III
+714010 = GAME | Aim_Lab | 에임랩스   # Aimlabs
+251570 = GAME | 7_Days_to_Die | 세븐 데이즈 투 다이   # 7 Days to Die
+2054970 = GAME | Dragons_Dogma2 | 드래곤즈 도그마 2   # Dragon's Dogma 2
+2050650 = GAME | BIOHAZARD_RE4 | 바이오하자드 RE:4   # Resident Evil 4
