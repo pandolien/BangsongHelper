@@ -6,27 +6,19 @@
 
 ## 1. 설치 방법
 
-### 방법 A — 소스 코드로 쓰기
-
 1. 이 저장소를 내려받습니다.
-2. `run.bat` 을 더블클릭합니다.
-   - 처음 한 번은 파이썬(없으면 자동 설치) → 가상환경(`.venv`) → 라이브러리 설치가 진행됩니다.
-   - 설치만 따로 하려면 `install.bat` 을 실행하세요.
+2. `install.bat` 을 더블클릭합니다.
+   - 파이썬(없으면 자동 설치) → 가상환경(`.venv`) → 라이브러리 설치가 진행됩니다.
+   - 처음 한 번만 하면 됩니다.
 
+## 2. 실행 방법
 
-### 방법 B — exe 로 쓰기 (파이썬 필요 없음)
-
-1. `chzzkControl` 폴더(압축 파일)를 받아서 원하는 곳에 풉니다.
-2. 폴더 안의 `chzzkControl.exe` 를 실행합니다.
-
-
-### exe 직접 만들기
-
-`build_exe.bat` 실행 → `dist\chzzkControl\` 폴더에 exe 가 만들어집니다. 이 폴더를 통째로 압축해서 나눠 주면 됩니다.
+`run.bat` 을 더블클릭하면 프로그램이 켜집니다.
+(설치를 안 했으면 `install.bat` 이 자동으로 먼저 실행됩니다.)
 
 ---
 
-## 2. 사용 방법
+## 3. 사용 방법
 
 ### 처음 설정 (한 번만)
 
@@ -45,6 +37,13 @@
 > 치지직 개발자 센터에서 쓰려는 기능의 **API Scope(권한)** 를 체크해야 합니다.
 > (방송 설정 변경, 채팅 메시지 조회/쓰기, 채팅 공지, 후원 조회, 활동제한 조회/쓰기)
 > 권한을 추가했다면 **로그아웃 → 다시 로그인** 해야 적용됩니다.
+
+> **주의:** 입력한 키 · 토큰은 `data/init.json` 에 저장됩니다. 이 파일은 남에게 보여주거나 깃허브에 올리면 안 됩니다.
+> 소스 코드로 쓰는 경우, 키를 넣은 뒤 한 번 아래 명령을 실행해 두세요. (이 PC 에서 이 파일 변경을 git 이 무시)
+>
+> ```
+> git update-index --skip-worktree data/init.json
+> ```
 
 ### 화면(GUI)
 
@@ -75,49 +74,13 @@
 
 ---
 
-## 3. 파일 위치
+## 4. 사용설명서 위치
 
-모든 설정 · 기록은 프로그램 폴더 안의 **`data/`** 폴더에 저장됩니다.
-(소스로 실행하면 `main.py` 가 있는 폴더, exe 로 실행하면 `chzzkControl.exe` 가 있는 폴더)
-
-| 파일 | 내용 | 공유 |
-|---|---|---|
-| `data/init.json` | 모든 설정 + API 키 · Secret · 토큰. 저장소에는 **키를 비운 양식**으로 올라가 있음 | ⚠️ 빈 양식만 |
-| `data/donations.json` | 받은 후원 기록 (닉네임 · 금액 · 내용) | ❌ |
-| `data/missions.json` | 미션 기록 | ❌ |
-| `data/youtube_quota.json` | 유튜브 오늘 사용량 | ❌ |
-| `data/error.log` | 오류 기록 | ⚠️ 확인 후 |
-| `data/mission_timer.txt` | OBS 에 띄우는 미션 타이머 (1초마다 갱신) | — |
-| `data/game_map.txt` | 게임 ↔ 치지직 카테고리 짝 목록 | ✅ 가능 |
-| `docs/chzzkControl_정리.pdf` | 그림으로 보는 사용 안내서 | ✅ 가능 |
-
-> **주의:** 키를 넣거나 치지직 로그인을 하면 `data/init.json` 에 진짜 키 · 토큰이 저장됩니다.
-> 그대로 `git add .` 하면 깃허브에 올라가니, 키를 넣은 뒤 한 번 아래 명령을 실행해 두세요. (이 PC 에서 이 파일 변경을 무시)
->
-> ```
-> git update-index --skip-worktree data/init.json
-> ```
-
-### 소스 코드 구성
-
-```
-chzzkControl/
-├─ main.py / main_cli.py    시작점 (GUI / 터미널 명령)
-├─ config_manager.py        data/init.json 읽기 · 쓰기
-├─ app_paths.py             프로그램 · data 폴더 위치
-├─ game_map.py              게임 짝 파일 관리
-├─ game_detect.py           실행 중인 게임 감지
-├─ category_match.py        게임 → 치지직 카테고리 자동 찾기
-├─ steam/                   스팀 API
-├─ chzzk/                   치지직 API · 로그인 · 실시간 채팅
-├─ youtube/                 유튜브 채팅 API
-├─ gui/                     화면 (메인 · 채팅 · 후원 · 미션 · 방송 도우미 · 테스트 도구)
-└─ install.bat / run.bat / build_exe.bat
-```
+화면 그림과 함께 자세히 설명한 사용설명서(PDF): [`docs/chzzkControl_정리.pdf`](docs/chzzkControl_정리.pdf)
 
 ---
 
-## 4. 기능
+## 5. 기능
 
 - **상태 보기** — 스팀에서 하는 게임, 치지직 방송 켜짐 여부 · 제목 · 카테고리 · 시청자 수 (자동 새로고침)
 - **방송 설정 변경** — 방송 제목 · 카테고리 변경, 채팅 전송, 채팅 공지 등록
