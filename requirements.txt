@@ -1,6 +1,7 @@
 requests>=2.31
 PySide6>=6.6
-# 치지직 실시간 채팅은 Socket.IO 2.x 방식만 지원해서 4.x 버전으로 고정해요.
+# CHZZK live chat only supports Socket.IO 2.x, so python-socketio is pinned to 4.x.
+# NOTE: keep this file ASCII only. pip reads it with the system codepage (cp949 on Korean Windows).
 python-socketio[client]>=4.6,<5
 python-engineio>=3.13,<4
 websocket-client>=1.6

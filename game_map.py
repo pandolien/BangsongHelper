@@ -44,7 +44,7 @@ STR_FILE_HEADER = """\
 #  한 줄 모양:
 #    스팀gameid = 카테고리종류 | 카테고리ID | 치지직카테고리이름   # 메모
 #
-#  - 스팀gameid      : 숫자 (프로그램 대시보드의 '플레이 중' 옆 ID)
+#  - 스팀gameid      : 숫자 ([보기] → [방송 상태] 의 '플레이 중' 옆 ID)
 #                      스팀 밖 게임은 exe:프로그램이름.exe (예: exe:valorant-win64-shipping.exe)
 #  - 카테고리종류    : GAME / SPORTS / ETC 중 하나
 #  - 카테고리ID      : 치지직 카테고리 ID (프로그램에서 카테고리를 골라 적용하면 자동으로 채워져요)

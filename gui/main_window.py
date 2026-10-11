@@ -2,12 +2,14 @@
 PySide6 데스크톱 프로그램 (GUI)
 ================================
 
-화면 구성 (탭 5개)
-    [대시보드]  지금 하는 게임(스팀 + 실행 중인 프로그램) + 치지직 방송 상태를 보여주고, 정해진 시간마다 자동 새로고침
+화면 구성 (한 화면)
+    맨 위 막대  방송 상태 · 시청자 · 로그인 · 지금 게임을 한눈에 + 새로고침 · 방송 도우미 · 설정 · 색상 버튼
+    [상태]      스팀 · 지금 하는 게임 · 치지직 방송 상태. 정해진 시간마다 자동 새로고침
     [방송 관리] 치지직 로그인, 방송 제목/카테고리 변경, 채팅 보내기, 공지 등록
     [게임 짝]   게임(스팀 gameid / 프로그램 exe) ↔ 치지직 카테고리 짝 목록 보기 / 추가 / 수정 / 삭제
-    [설정]      API 키, 스팀 ID, 채널 ID 등을 입력하고 저장
-    [URL 설정]  스팀/치지직 서버 주소 바꾸기
+    맨 아래     로그
+    [설정] 창   API 키 · ID · 새로고침 간격 / 서버 주소(URL) — 처음 한 번만 쓰니 버튼으로 따로 열어요
+    [색상] 창   프로그램 색 바꾸기 (gui/theme.py)
 
 왜 '일꾼(Worker)' 을 따로 쓰나요?
     인터넷 요청은 몇 초씩 걸릴 수 있어요. 화면을 그리는 친구(메인 스레드)가 직접 기다리면
@@ -26,7 +28,7 @@ from typing import Callable, Optional
 import socketio  # noqa: F401  (순서 맞추기용)
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -50,8 +52,9 @@ from config_manager import STR_CONFIG_PATH, LoadConfig, SaveConfig, StoreTokenTo
 from steam import DICT_DEFAULT_STEAM_URLS, SteamApiClient, SteamApiError, SteamPlayerStatus
 from youtube import DICT_DEFAULT_YOUTUBE_URLS
 from gui.youtube_hub import YouTubeHub
+from gui.theme import BuildPalette, BuildStyleSheet, ThemeColors, ThemeDialog
 
-# URL 설정 탭에 보여줄 '사람이 읽는 이름'. (init.json 의 칸 이름 → 화면 글자)
+# URL 설정에 보여줄 '사람이 읽는 이름'. (init.json 의 칸 이름 → 화면 글자)
 DICT_URL_LABELS = {
     "steam": {
         "player_summaries": "플레이어 요약 (GetPlayerSummaries)",
@@ -137,17 +140,19 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("치지직 + 스팀 컨트롤러")
-        self.resize(720, 640)
+        self.setWindowTitle("치지직 방송 도우미")
+        self.resize(1280, 820)
 
         self.objThreadPool = QThreadPool.globalInstance()
         # 아래쪽에 '무슨 일이 있었는지' 기록하는 일기장
         # (맨 먼저 만들어요. 후원 목록 창 등이 만들어지면서 바로 로그를 남길 수 있어서)
         self.txtLog = QPlainTextEdit()
+        self.txtLog.setObjectName("Log")
         self.txtLog.setReadOnly(True)
         self.txtLog.setMaximumBlockCount(500)
-        self.txtLog.setFixedHeight(140)
+        self.txtLog.setMinimumHeight(60)
         self.dictConfig = LoadConfig()
+        self._ApplyTheme()  # 저장된 색으로 프로그램 전체를 칠해요. (다른 창들도 같이)
         self.objChzzkClient: Optional[ChzzkApiClient] = None
         self.objSteamClient: Optional[SteamApiClient] = None
         self.objLastSteamStatus: Optional[SteamPlayerStatus] = None
@@ -184,26 +189,43 @@ class MainWindow(QMainWindow):
         self.objYouTubeHub.sigDonation.connect(self.objDonationWindow.AddDonation)
         self.objYouTubeHub.sigDonation.connect(self.objMissionWindow._OnDonation)
         self.objChatWindow = ChatWindow(self.objChatHub, fnLog=self.Log, objYouTubeHub=self.objYouTubeHub,
-                                        fnSaveYouTubeTarget=self._SaveYouTubeTarget,
-                                        strYouTubeTarget=self.dictConfig["youtube"].get("default_target", ""))
+                                        fnGetYouTubeTarget=lambda: self.dictConfig["youtube"].get("default_target", ""))
+        self._ApplyTheme()  # 채팅창이 생겼으니 채팅 칸에도 색을 입혀요.
         self.objStreamWindow = StreamToolsWindow(self.objChatHub, self.objChatWindow,
                                                  self.objDonationWindow, self.objMissionWindow)
         self.listActiveWorkers = []  # 일꾼이 일하는 도중 사라지지 않도록 붙잡아 두는 목록
 
-        objTabs = QTabWidget()
-        objTabs.addTab(self._BuildDashboardTab(), "대시보드")
-        objTabs.addTab(self._BuildManageTab(), "방송 관리")
-        objTabs.addTab(self._BuildGameMapTab(), "게임 짝")
-        objTabs.addTab(self._BuildSettingsTab(), "설정")
-        objTabs.addTab(self._BuildUrlTab(), "URL 설정")
+        # 방송 도우미(채팅 + 후원 + 미션)를 따로 뜨는 창이 아니라 메인 화면 가운데에 넣어요.
+        # (메인 창이 보이면 채팅 연결을 잡아요 → 프로그램을 켜면 바로 채팅이 보여요)
+        self.objStreamWindow.setWindowFlags(Qt.WindowType.Widget)
 
+        # 맨 위 막대 먼저 (아래 창들을 만들면서 막대의 딱지를 바로 고쳐요)
+        objHeader = self._BuildHeader()
+
+        # 메뉴에서 여는 창들 (입력칸은 미리 만들어 둬요. 닫아도 그대로 남아 있어요)
+        # 만드는 순서: 방송 관리 → 방송 상태 → 게임 짝(만들면서 앞의 두 창 글자를 고쳐요)
+        self.dlgManage = self._MakeWindow("방송 관리", self._BuildManageTab(), 560, 760)
+        self.dlgStatus = self._MakeWindow("방송 상태 (치지직 · 스팀)", self._BuildStatusColumn(), 460, 520)
+        self.dlgGameMap = self._MakeWindow("게임 짝", self._BuildGameMapTab(), 760, 680)
+        self.dlgSettings = self._BuildSettingsDialog()
+        self.dlgLog = self._MakeWindow("로그", self.txtLog, 760, 420)
+        self._BuildMenu()
 
         objCentral = QWidget()
+        objCentral.setObjectName("Central")
         objLayout = QVBoxLayout(objCentral)
-        objLayout.addWidget(objTabs)
-        objLayout.addWidget(QLabel("로그"))
-        objLayout.addWidget(self.txtLog)
+        objLayout.setContentsMargins(0, 0, 0, 0)
+        objLayout.setSpacing(0)
+        objLayout.addWidget(objHeader)
+        objLayout.addWidget(self.objStreamWindow, 1)
         self.setCentralWidget(objCentral)
+
+        # 맨 아래 상태줄: 마지막 로그 한 줄 (전체는 [보기] → 로그)
+        self.lblStatusLog = QLabel("")
+        self.lblStatusLog.setObjectName("Help")
+        self.statusBar().addWidget(self.lblStatusLog, 1)
+        listLogLines = self.txtLog.toPlainText().splitlines()
+        self.lblStatusLog.setText(listLogLines[-1] if listLogLines else "")
 
         # 자동 새로고침 타이머 (알람 시계)
         self.objRefreshTimer = QTimer(self)
@@ -222,73 +244,165 @@ class MainWindow(QMainWindow):
     # 화면 만들기
     # ===================================================================
 
-    def _BuildDashboardTab(self) -> QWidget:
-        objTab = QWidget()
-        objLayout = QVBoxLayout(objTab)
+    def _BuildHeader(self) -> QWidget:
+        """맨 위 막대: 방송 상태 · 시청자 · 로그인 · 지금 게임 (색 딱지) + 방송 제목 · 카테고리."""
+        objHeader = QFrame()
+        objHeader.setObjectName("Header")
+        objLayout = QVBoxLayout(objHeader)
+        objLayout.setContentsMargins(14, 8, 14, 8)
+        objLayout.setSpacing(4)
 
-        # --- 스팀 상자 ---
-        objSteamBox = QGroupBox("스팀 (Steam)")
-        objSteamForm = QFormLayout(objSteamBox)
-        self.lblSteamName = QLabel("-")
-        self.lblSteamState = QLabel("-")
-        self.lblSteamGame = QLabel("-")
-        self.lblSteamGame.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        objSteamForm.addRow("닉네임", self.lblSteamName)
-        objSteamForm.addRow("접속 상태", self.lblSteamState)
-        objSteamForm.addRow("플레이 중", self.lblSteamGame)
+        objRow = QHBoxLayout()
+        objRow.setSpacing(8)
+        self.lblChipLive = self._Chip("방송 확인 전")
+        self.lblChipViewers = self._Chip("시청자 -")
+        self.lblChipLogin = self._Chip("로그인 확인 전")
+        self.lblChipGame = self._Chip("게임 -")
+        for lblChip in (self.lblChipLive, self.lblChipViewers, self.lblChipLogin, self.lblChipGame):
+            objRow.addWidget(lblChip)
+        objRow.addStretch()
+        self.lblLastUpdated = QLabel("")
+        self.lblLastUpdated.setObjectName("Help")
+        self.btnHeaderLogin = QPushButton("치지직 로그인")
+        self.btnHeaderLogin.setObjectName("Primary")
+        self.btnHeaderLogin.setToolTip("채팅 · 후원을 받으려면 로그인이 필요해요.")
+        self.btnHeaderLogin.clicked.connect(self.OnLoginClicked)
+        self.btnRefresh = QPushButton("새로고침")
+        self.btnRefresh.clicked.connect(self.OnRefreshClicked)
+        self.chkAutoRefresh = QCheckBox("자동")
+        self.chkAutoRefresh.setToolTip("[설정] 의 새로고침 간격마다 자동으로 새로고침해요.")
+        self.chkAutoRefresh.toggled.connect(self.OnAutoRefreshToggled)
+        for objWidget in (self.lblLastUpdated, self.btnHeaderLogin, self.btnRefresh, self.chkAutoRefresh):
+            objRow.addWidget(objWidget)
+        objLayout.addLayout(objRow)
 
-        # --- 지금 하는 게임 상자 (스팀 + 프로그램 감지를 합친 결과, 카테고리 맞추기에 쓰여요) ---
-        objGameBox = QGroupBox("지금 하는 게임 (스팀 + 실행 중인 프로그램)")
-        objGameForm = QFormLayout(objGameBox)
-        self.lblCurrentGame = QLabel("-")
-        self.lblCurrentGame.setWordWrap(True)
-        self.lblCurrentGame.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        objGameForm.addRow("게임", self.lblCurrentGame)
+        # 둘째 줄: 방송 제목 · 카테고리
+        self.lblHeaderTitle = QLabel("방송 제목 -")
+        self.lblHeaderTitle.setObjectName("HeaderTitle")
+        self.lblHeaderTitle.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lblHeaderCategory = QLabel("")
+        self.lblHeaderCategory.setObjectName("Help")
+        objTitleRow = QHBoxLayout()
+        objTitleRow.addWidget(self.lblHeaderTitle, 1)
+        objTitleRow.addWidget(self.lblHeaderCategory)
+        objLayout.addLayout(objTitleRow)
+
+        # 후원 대기 · 미션 수는 창 제목에 보여줘요.
+        self.objStreamWindow.sigCountsChanged.connect(self._UpdateStreamButton)
+        self._UpdateStreamButton(self.objStreamWindow.nPending, self.objStreamWindow.nActiveMissions)
+        return objHeader
+
+    def _BuildMenu(self) -> None:
+        """맨 위 메뉴: 자주 안 쓰는 화면은 여기서 눌러서 열어요."""
+        objMenuBar = self.menuBar()
+
+        objBroadcast = objMenuBar.addMenu("방송(&B)")
+        objBroadcast.addAction("방송 관리 (제목 · 카테고리 · 공지)...", lambda: self._OpenWindow(self.dlgManage))
+        objBroadcast.addAction("지금 게임으로 카테고리 맞추기", self.OnSyncSteamGameClicked)
+        objBroadcast.addSeparator()
+        objBroadcast.addAction("새로고침", self.OnRefreshClicked).setShortcut("F5")
+        objBroadcast.addSeparator()
+        objBroadcast.addAction("치지직 로그인", self.OnLoginClicked)
+        objBroadcast.addAction("로그아웃", self.OnLogoutClicked)
+
+        objView = objMenuBar.addMenu("보기(&V)")
+        objView.addAction("방송 상태 (치지직 · 스팀)...", lambda: self._OpenWindow(self.dlgStatus))
+        objView.addAction("게임 짝...", lambda: self._OpenWindow(self.dlgGameMap))
+        objView.addAction("로그...", lambda: self._OpenWindow(self.dlgLog))
+
+        objSettings = objMenuBar.addMenu("설정(&S)")
+        objSettings.addAction("키 · ID · 서버 주소...", self.OnOpenSettingsClicked)
+        objSettings.addAction("색상...", self.OnThemeClicked)
+
+    def _MakeWindow(self, strTitle: str, objContent: QWidget, nWidth: int, nHeight: int) -> QDialog:
+        """메뉴에서 여는 창 하나. (메인 창을 막지 않아서 열어 둔 채로 써도 돼요)"""
+        dlgWindow = QDialog(self)
+        dlgWindow.setWindowTitle(strTitle)
+        dlgWindow.resize(nWidth, nHeight)
+        QVBoxLayout(dlgWindow).addWidget(objContent)
+        return dlgWindow
+
+    @staticmethod
+    def _OpenWindow(dlgWindow: QDialog) -> None:
+        dlgWindow.show()
+        dlgWindow.raise_()
+        dlgWindow.activateWindow()
+
+    @staticmethod
+    def _Chip(strText: str) -> QLabel:
+        """맨 위 막대의 둥근 색 딱지."""
+        lblChip = QLabel(strText)
+        lblChip.setObjectName("Chip")
+        return lblChip
+
+    @staticmethod
+    def _SetChip(lblChip: QLabel, strText: str, strState: str = "") -> None:
+        """딱지 글자와 색(live · good · warn · off, 빈칸이면 기본)을 바꿔요."""
+        lblChip.setText(strText)
+        lblChip.setProperty("state", strState)
+        lblChip.style().unpolish(lblChip)  # 색 다시 칠하기
+        lblChip.style().polish(lblChip)
+
+    def _BuildStatusColumn(self) -> QWidget:
+        """[방송 상태] 창: 치지직 → 지금 하는 게임 → 스팀 (위에서 아래로)."""
+        objInner = QWidget()
+        objLayout = QVBoxLayout(objInner)
+        objLayout.setContentsMargins(0, 0, 0, 0)
 
         # --- 치지직 상자 ---
         objChzzkBox = QGroupBox("치지직 (CHZZK)")
         objChzzkForm = QFormLayout(objChzzkBox)
         self.lblChzzkChannel = QLabel("-")
         self.lblChzzkStatus = QLabel("-")
+        self.lblChzzkStatus.setObjectName("Value")
         self.lblChzzkTitle = QLabel("-")
         self.lblChzzkTitle.setWordWrap(True)
         self.lblChzzkCategory = QLabel("-")
+        self.lblChzzkCategory.setWordWrap(True)
         self.lblChzzkViewers = QLabel("-")
+        self.lblChzzkViewers.setObjectName("Value")
         objChzzkForm.addRow("채널", self.lblChzzkChannel)
         objChzzkForm.addRow("방송 상태", self.lblChzzkStatus)
         objChzzkForm.addRow("방송 제목", self.lblChzzkTitle)
         objChzzkForm.addRow("카테고리", self.lblChzzkCategory)
         objChzzkForm.addRow("시청자 수", self.lblChzzkViewers)
 
-        # --- 버튼 줄 ---
-        objButtonRow = QHBoxLayout()
-        self.btnRefresh = QPushButton("지금 새로고침")
-        self.btnRefresh.clicked.connect(self.OnRefreshClicked)
-        self.chkAutoRefresh = QCheckBox("자동 새로고침")
-        self.chkAutoRefresh.toggled.connect(self.OnAutoRefreshToggled)
-        self.lblLastUpdated = QLabel("")
-        objButtonRow.addWidget(self.btnRefresh)
-        objButtonRow.addWidget(self.chkAutoRefresh)
-        self.btnOpenDonationDash = QPushButton("방송 도우미")
-        self.btnOpenDonationDash.setToolTip("실시간 채팅 · 후원 목록 · 미션 타이머를 한 화면에서 봐요.")
-        self.btnOpenDonationDash.clicked.connect(self.OnOpenChatWindowClicked)
-        self.objStreamWindow.sigCountsChanged.connect(self._UpdateStreamButton)
-        self._UpdateStreamButton(self.objStreamWindow.nPending, self.objStreamWindow.nActiveMissions)
-        objButtonRow.addWidget(self.btnOpenDonationDash)
-        objButtonRow.addStretch()
-        objButtonRow.addWidget(self.lblLastUpdated)
+        # --- 지금 하는 게임 상자 (스팀 + 프로그램 감지를 합친 결과, 카테고리 맞추기에 쓰여요) ---
+        objGameBox = QGroupBox("지금 하는 게임")
+        objGameForm = QFormLayout(objGameBox)
+        self.lblCurrentGame = QLabel("-")
+        self.lblCurrentGame.setWordWrap(True)
+        self.lblCurrentGame.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        objGameForm.addRow("게임", self.lblCurrentGame)
 
-        objLayout.addWidget(objSteamBox)
-        objLayout.addWidget(objGameBox)
+        # --- 스팀 상자 ---
+        objSteamBox = QGroupBox("스팀 (Steam)")
+        objSteamForm = QFormLayout(objSteamBox)
+        self.lblSteamName = QLabel("-")
+        self.lblSteamState = QLabel("-")
+        self.lblSteamState.setWordWrap(True)
+        self.lblSteamGame = QLabel("-")
+        self.lblSteamGame.setWordWrap(True)
+        self.lblSteamGame.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        objSteamForm.addRow("닉네임", self.lblSteamName)
+        objSteamForm.addRow("접속 상태", self.lblSteamState)
+        objSteamForm.addRow("플레이 중", self.lblSteamGame)
+
         objLayout.addWidget(objChzzkBox)
-        objLayout.addLayout(objButtonRow)
+        objLayout.addWidget(objGameBox)
+        objLayout.addWidget(objSteamBox)
         objLayout.addStretch()
-        return objTab
+
+        objScroll = QScrollArea()
+        objScroll.setWidgetResizable(True)
+        objScroll.setWidget(objInner)
+        return objScroll
 
     def _BuildManageTab(self) -> QWidget:
-        """방송 관리 탭: 위에서 아래로 [로그인 상태] → [지금 방송 설정] → ①제목 ②카테고리 ③채팅 순서예요."""
+        """방송 관리 칸: 위에서 아래로 [로그인 상태] → [지금 방송 설정] → ①제목 ②카테고리 ③채팅 순서예요."""
         objInner = QWidget()
         objLayout = QVBoxLayout(objInner)
+        objLayout.setContentsMargins(0, 0, 0, 0)
         objLayout.setSpacing(10)
 
         # --- 맨 위: 로그인 상태 막대 (색으로 한눈에!) ---
@@ -333,6 +447,7 @@ class MainWindow(QMainWindow):
         self.editTitle.setPlaceholderText("새 방송 제목")
         self.editTitle.returnPressed.connect(self.OnApplyTitleClicked)
         btnApplyTitle = QPushButton("제목 적용")
+        btnApplyTitle.setObjectName("Primary")
         btnApplyTitle.clicked.connect(self.OnApplyTitleClicked)
         objTitleRow = QHBoxLayout()
         objTitleRow.addWidget(self.editTitle, 1)
@@ -345,10 +460,11 @@ class MainWindow(QMainWindow):
         objCategoryLayout = QVBoxLayout(self.grpCategory)
 
         # 방법 A: 지금 하는 게임으로 맞추기 (스팀 또는 실행 중인 프로그램)
-        objCategoryLayout.addWidget(self._SubTitleLabel("방법 A. 지금 하는 게임으로 맞추기 (추천, 스팀 + 롤·발로란트 등)"))
-        self.lblManageSteamGame = QLabel("지금 게임: 확인 전 (대시보드를 새로고침해 주세요)")
+        objCategoryLayout.addWidget(self._SubTitleLabel("방법 A. 지금 하는 게임으로 맞추기 (추천)"))
+        self.lblManageSteamGame = QLabel("지금 게임: 확인 전 (맨 위 [새로고침] 을 눌러 주세요)")
         self.lblManageSteamGame.setWordWrap(True)
         btnSyncGame = QPushButton("지금 게임으로 맞추기")
+        btnSyncGame.setObjectName("Primary")
         btnSyncGame.setToolTip("짝이 저장된 게임이면 바로 적용하고, 없으면 검색해서 고르게 해줘요.")
         btnSyncGame.clicked.connect(self.OnSyncSteamGameClicked)
         objSyncRow = QHBoxLayout()
@@ -369,15 +485,18 @@ class MainWindow(QMainWindow):
         objPendingRow.addWidget(self.btnCancelPending)
         objCategoryLayout.addWidget(self.frmPending)
 
-        self.chkAutoSyncCategory = QCheckBox("게임이 바뀌면 자동으로 맞추기 (짝이 없으면 자동으로 찾아요, 대시보드 자동 새로고침 필요)")
+        self.chkAutoSyncCategory = QCheckBox("게임이 바뀌면 자동으로 맞추기")
+        self.chkAutoSyncCategory.setToolTip("짝이 없으면 자동으로 찾아요. 맨 위 [자동] 새로고침을 켜 둬야 해요.")
         self.chkAutoSyncCategory.setChecked(bool(self.dictConfig["app"].get("auto_sync_category", False)))
         self.chkAutoSyncCategory.toggled.connect(self.OnAutoSyncToggled)
         objCategoryLayout.addWidget(self.chkAutoSyncCategory)
-        self.chkFallbackVarious = QCheckBox("짝을 못 찾은 게임은 '종합 게임' 으로 (자동 맞추기 때, 짝으로 저장하지는 않아요)")
+        self.chkFallbackVarious = QCheckBox("짝을 못 찾으면 '종합 게임' 으로")
+        self.chkFallbackVarious.setToolTip("자동 맞추기 때만 써요. 짝으로 저장하지는 않아요.")
         self.chkFallbackVarious.setChecked(bool(self.dictConfig["app"].get("auto_fallback_various", True)))
         self.chkFallbackVarious.toggled.connect(self.OnFallbackVariousToggled)
         objCategoryLayout.addWidget(self.chkFallbackVarious)
-        self.chkFolderGames = QCheckBox("목록에 없는 게임도 알아보기 (에픽 · 넥슨 · 엑스박스 등 게임 설치 폴더에서 실행된 프로그램)")
+        self.chkFolderGames = QCheckBox("목록에 없는 게임도 알아보기")
+        self.chkFolderGames.setToolTip("에픽 · 넥슨 · 엑스박스 등 게임 설치 폴더에서 실행된 프로그램도 게임으로 봐요.")
         self.chkFolderGames.setChecked(bool(self.dictConfig["app"].get("auto_detect_folder_games", True)))
         self.chkFolderGames.toggled.connect(self.OnFolderGamesToggled)
         objCategoryLayout.addWidget(self.chkFolderGames)
@@ -386,7 +505,7 @@ class MainWindow(QMainWindow):
         objCategoryLayout.addSpacing(6)
         objCategoryLayout.addWidget(self._SubTitleLabel("방법 B. 직접 검색해서 고르기"))
         self.editCategoryQuery = QLineEdit()
-        self.editCategoryQuery.setPlaceholderText("카테고리 이름 (예: 나이트레인, 리그 오브 레전드, talk)")
+        self.editCategoryQuery.setPlaceholderText("카테고리 이름 (예: 나이트레인, talk)")
         self.editCategoryQuery.returnPressed.connect(self.OnSearchCategoryClicked)
         btnSearchCategory = QPushButton("검색")
         btnSearchCategory.clicked.connect(self.OnSearchCategoryClicked)
@@ -398,6 +517,7 @@ class MainWindow(QMainWindow):
         self.cmbCategory = QComboBox()
         self.cmbCategory.setPlaceholderText("검색하면 여기에 결과가 나와요")
         btnApplyCategory = QPushButton("카테고리 적용")
+        btnApplyCategory.setObjectName("Primary")
         btnApplyCategory.clicked.connect(self.OnApplyCategoryClicked)
         objResultRow = QHBoxLayout()
         objResultRow.addWidget(self.cmbCategory, 1)
@@ -407,31 +527,21 @@ class MainWindow(QMainWindow):
         self._SetPendingMapGame(None)
 
         # --- ③ 채팅 ---
-        self.grpChat = QGroupBox("③ 채팅")
+        self.grpChat = QGroupBox("채팅 · 공지")
         objChatLayout = QVBoxLayout(self.grpChat)
-        objChatLayout.addWidget(self._HelpLabel("최대 100자. 공지는 채팅창 맨 위에 고정돼요. "
-                                                "채팅 · 후원 · 미션은 [방송 도우미] 한 화면에서 볼 수 있어요."))
-        btnOpenChat = QPushButton("방송 도우미 열기 (채팅 · 후원 · 미션)")
-        btnOpenChat.clicked.connect(self.OnOpenChatWindowClicked)
-        btnOpenDonation = QPushButton("후원 목록 열기 (영상 후원 관리)")
-        btnOpenDonation.clicked.connect(self.OnOpenDonationWindowClicked)
-        objOpenRow = QHBoxLayout()
-        objOpenRow.addWidget(btnOpenChat)
-        objOpenRow.addWidget(btnOpenDonation)
-        btnOpenMission = QPushButton("미션 · 타이머 열기")
-        btnOpenMission.clicked.connect(self.OnOpenMissionWindowClicked)
-        objOpenRow.addWidget(btnOpenMission)
-        objChatLayout.addLayout(objOpenRow)
-        self.chkAutoDonation = QCheckBox("프로그램을 켜면 후원 받기 자동 시작 (후원 목록 창을 안 열어도 영상 후원이 기록돼요)")
+        objChatLayout.addWidget(self._HelpLabel("최대 100자. 공지는 채팅창 맨 위에 고정돼요."))
+        self.chkAutoDonation = QCheckBox("프로그램을 켜면 후원 받기 자동 시작")
+        self.chkAutoDonation.setToolTip("후원 목록 창을 안 열어도 영상 후원이 기록돼요.")
         self.chkAutoDonation.setChecked(bool(self.dictConfig["app"].get("auto_donation", True)))
         self.chkAutoDonation.toggled.connect(self.OnAutoDonationToggled)
         objChatLayout.addWidget(self.chkAutoDonation)
         objChatForm = QFormLayout()
         self.editChat = QLineEdit()
         self.editChat.setMaxLength(100)
-        self.editChat.setPlaceholderText("채팅창에 보낼 메시지 (Enter 로 전송)")
+        self.editChat.setPlaceholderText("보낼 메시지 (Enter 로 전송)")
         self.editChat.returnPressed.connect(self.OnSendChatClicked)
         btnSendChat = QPushButton("보내기")
+        btnSendChat.setObjectName("Primary")
         btnSendChat.clicked.connect(self.OnSendChatClicked)
         objChatRow = QHBoxLayout()
         objChatRow.addWidget(self.editChat, 1)
@@ -451,16 +561,6 @@ class MainWindow(QMainWindow):
         objLayout.addWidget(self.grpChat)
         objLayout.addStretch()
 
-        # 색깔 꾸미기 (로그인 막대, 짝 저장 대기 막대)
-        objInner.setStyleSheet("""
-            QWidget#LoginBar[state="on"]   { background: #e7f6ee; border: 1px solid #9ad5b5; border-radius: 6px; }
-            QWidget#LoginBar[state="off"]  { background: #fff4e5; border: 1px solid #f0c27b; border-radius: 6px; }
-            QWidget#LoginBar[state="none"] { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; }
-            QWidget#LoginBar QLabel, QWidget#PendingBar QLabel { color: #1f2937; background: transparent; border: none; }
-            QWidget#PendingBar { background: #eef4ff; border: 1px solid #a9c3f5; border-radius: 6px; }
-            QGroupBox { font-weight: bold; }
-        """)
-
         # 칸이 많아서 창이 작으면 스크롤로 볼 수 있게 해요.
         objScroll = QScrollArea()
         objScroll.setWidgetResizable(True)
@@ -472,15 +572,60 @@ class MainWindow(QMainWindow):
         """회색 작은 글씨 설명."""
         lblHelp = QLabel(strText)
         lblHelp.setWordWrap(True)
-        lblHelp.setStyleSheet("color: #6b7280; font-weight: normal;")
+        lblHelp.setObjectName("Help")  # 색은 gui/theme.py 에서
         return lblHelp
 
     @staticmethod
     def _SubTitleLabel(strText: str) -> QLabel:
         """그룹 안의 작은 제목."""
         lblTitle = QLabel(strText)
-        lblTitle.setStyleSheet("font-weight: bold; color: #00875a;")
+        lblTitle.setWordWrap(True)
+        lblTitle.setObjectName("SubTitle")  # 색은 gui/theme.py 에서
         return lblTitle
+
+    def _BuildSettingsDialog(self) -> QDialog:
+        """[설정] 창: 키 · ID 와 서버 주소(URL). 닫아도 입력칸은 그대로 남아 있어요."""
+        dlgSettings = QDialog(self)
+        dlgSettings.setWindowTitle("설정")
+        dlgSettings.resize(640, 600)
+        objTabs = QTabWidget()
+        objTabs.addTab(self._BuildSettingsTab(), "키 · ID")
+        objTabs.addTab(self._BuildUrlTab(), "서버 주소 (URL)")
+        QVBoxLayout(dlgSettings).addWidget(objTabs)
+        return dlgSettings
+
+    def OnOpenSettingsClicked(self) -> None:
+        self.dlgSettings.show()
+        self.dlgSettings.raise_()
+        self.dlgSettings.activateWindow()
+
+    def _ApplyTheme(self, dictColors: Optional[dict] = None) -> None:
+        """색을 프로그램 전체에 입혀요. (dictColors 가 없으면 저장된 색)"""
+        if dictColors is None:
+            dictColors = ThemeColors(self.dictConfig.get("theme"))
+        objApp = QApplication.instance()
+        # 'Fusion' 모양을 써요. (윈도우 기본 모양은 색을 입히면 화살표 · 체크 표시가 깨져요)
+        if objApp.style().name().lower() != "fusion":
+            objApp.setStyle("Fusion")
+        objApp.setPalette(BuildPalette(dictColors))
+        objApp.setStyleSheet(BuildStyleSheet(dictColors))
+        # 채팅 칸은 채팅 줄마다 색을 넣어 그려서, 새 색으로 다시 그려 달라고 따로 알려줘요.
+        if getattr(self, "objChatWindow", None) is not None:
+            self.objChatWindow.SetColors(dictColors["card"], dictColors["text"])
+
+    def OnThemeClicked(self) -> None:
+        """[색상] 창. 고르는 동안 바로 보여주고, 취소하면 원래 색으로 돌아가요."""
+        dlgTheme = ThemeDialog(self.dictConfig.get("theme"), fnPreview=self._ApplyTheme, parent=self)
+        if dlgTheme.exec() != QDialog.DialogCode.Accepted:
+            self._ApplyTheme()
+            return
+        self.dictConfig["theme"] = dlgTheme.GetTheme()
+        try:
+            SaveConfig(self.dictConfig)
+        except OSError as objError:
+            self.Log(f"[경고] 설정 저장 실패: {objError}")
+            return
+        self.Log(f"색상 저장 완료 ({self.dictConfig['theme']['preset']})")
 
     def _BuildSettingsTab(self) -> QWidget:
         objTab = QWidget()
@@ -515,6 +660,10 @@ class MainWindow(QMainWindow):
         self.editYouTubeApiKey = QLineEdit(dictYouTube.get("api_key", ""))
         self.editYouTubeApiKey.setEchoMode(QLineEdit.EchoMode.Password)
         self.editYouTubeApiKey.setPlaceholderText("Google Cloud → YouTube Data API v3 → API 키 (없으면 유튜브 채팅 안 씀)")
+        self.editYouTubeTarget = QLineEdit(dictYouTube.get("default_target", ""))
+        self.editYouTubeTarget.setPlaceholderText("https://www.youtube.com/live/... (또는 @채널이름)")
+        self.editYouTubeTarget.setToolTip("@채널이름은 지금 방송을 찾는 데 사용량 100점이 들어서 방송 주소를 추천해요.\n"
+                                          "저장한 뒤 채팅 위 [유튜브 연결] 을 누르면 연결돼요.")
         self.spinYouTubeInterval = QSpinBox()
         self.spinYouTubeInterval.setRange(3, 60)
         self.spinYouTubeInterval.setSuffix(" 초")
@@ -522,11 +671,13 @@ class MainWindow(QMainWindow):
         self.spinYouTubeInterval.setToolTip("짧을수록 채팅이 빨리 보이지만 하루 사용량(10,000점)을 빨리 써요. 8초면 하루 약 4시간.")
         objForm.addRow(QLabel("<b>유튜브 (채팅 같이 보기)</b>"))
         objForm.addRow("API 키", self.editYouTubeApiKey)
+        objForm.addRow("방송 주소", self.editYouTubeTarget)
         objForm.addRow("채팅 가져오는 간격", self.spinYouTubeInterval)
         objForm.addRow(QLabel("<b>앱</b>"))
         objForm.addRow("새로고침 간격", self.spinInterval)
 
         btnSave = QPushButton("저장")
+        btnSave.setObjectName("Primary")
         btnSave.clicked.connect(self.OnSaveSettingsClicked)
         objForm.addRow("", btnSave)
         objForm.addRow(QLabel(f"저장 위치: {STR_CONFIG_PATH}"))
@@ -556,6 +707,7 @@ class MainWindow(QMainWindow):
         btnReset = QPushButton("기본값으로 되돌리기")
         btnReset.clicked.connect(self.OnResetUrlsClicked)
         btnSave = QPushButton("URL 저장")
+        btnSave.setObjectName("Primary")
         btnSave.clicked.connect(self.OnSaveUrlsClicked)
         objButtonRow.addStretch()
         objButtonRow.addWidget(btnReset)
@@ -573,7 +725,10 @@ class MainWindow(QMainWindow):
     # ===================================================================
 
     def Log(self, strMessage: str) -> None:
-        self.txtLog.appendPlainText(time.strftime("[%H:%M:%S] ") + strMessage)
+        strLine = time.strftime("[%H:%M:%S] ") + strMessage
+        self.txtLog.appendPlainText(strLine)
+        if hasattr(self, "lblStatusLog"):  # 상태줄은 창을 다 만든 뒤에 생겨요.
+            self.lblStatusLog.setText(strLine)
 
     def RunInBackground(
         self,
@@ -606,7 +761,7 @@ class MainWindow(QMainWindow):
     def ShowError(self, objError: Exception) -> None:
         if isinstance(objError, ChzzkAuthRequiredError):
             self._UpdateLoginLabel()
-            QMessageBox.information(self, "로그인 필요", f"{objError}\n\n[방송 관리] 탭에서 '치지직 로그인' 을 눌러주세요.")
+            QMessageBox.information(self, "로그인 필요", f"{objError}\n\n맨 위 [치지직 로그인] 을 눌러주세요.")
         else:
             QMessageBox.warning(self, "오류", str(objError))
         self.Log(f"[경고] {objError}")
@@ -664,17 +819,20 @@ class MainWindow(QMainWindow):
         bLoggedIn = bool(bHasClient and self.objChzzkClient.bIsLoggedIn)
 
         if not bHasClient:
-            strState, strText = "none", "<b>치지직 설정 필요</b> — [설정] 탭에서 Client ID / Secret 을 먼저 입력해 주세요."
+            strState, strText = "none", "<b>치지직 설정 필요</b> — [설정] 메뉴에서 Client ID / Secret 을 먼저 입력해 주세요."
         elif bLoggedIn:
             strState, strText = "on", "<b>치지직 로그인됨</b> — 아래 기능을 모두 쓸 수 있어요."
         else:
             strState, strText = "off", "<b>로그인 필요</b> — 제목 · 카테고리 · 채팅은 [치지직 로그인] 후에 쓸 수 있어요."
         self.lblLoginState.setText(strText)
+        self._SetChip(self.lblChipLogin, *{"none": ("치지직 설정 필요", "warn"), "on": ("로그인됨", "good"),
+                                          "off": ("로그인 필요", "warn")}[strState])
         self.frmLoginBar.setProperty("state", strState)
         self.frmLoginBar.style().unpolish(self.frmLoginBar)  # 색 다시 칠하기
         self.frmLoginBar.style().polish(self.frmLoginBar)
 
         self.btnLogin.setVisible(bHasClient and not bLoggedIn)
+        self.btnHeaderLogin.setVisible(bHasClient and not bLoggedIn)
         self.btnLogin.setEnabled(True)
         self.btnLogout.setVisible(bLoggedIn)
         for grpBox in (self.grpCurrentSetting, self.grpTitle, self.grpCategory, self.grpChat):
@@ -735,11 +893,11 @@ class MainWindow(QMainWindow):
 
     def _RequireChzzk(self) -> Optional[ChzzkApiClient]:
         if self.objChzzkClient is None:
-            QMessageBox.information(self, "설정 필요", "[설정] 탭에서 치지직 Client ID / Secret 을 먼저 입력해 주세요.")
+            QMessageBox.information(self, "설정 필요", "[설정] 메뉴에서 치지직 Client ID / Secret 을 먼저 입력해 주세요.")
         return self.objChzzkClient
 
     # ===================================================================
-    # 대시보드 동작
+    # 상태 새로고침 동작
     # ===================================================================
 
     def OnRefreshClicked(self) -> None:
@@ -801,6 +959,7 @@ class MainWindow(QMainWindow):
                                               [objEntry.strSteamGameId for objEntry in self.objGameMap.ListEntries()],
                                               self.listLastFolderGames if self.chkFolderGames.isChecked() else [])
         objGame = self.objCurrentGame
+        self._SetChip(self.lblChipGame, f"게임: {objGame.strGameName}" if objGame else "게임 없음")
         if objGame is None:
             self.lblCurrentGame.setText("없음 (스팀 게임도, 짝이 있거나 잘 알려진 게임 프로그램도 안 보여요)")
         else:
@@ -813,9 +972,9 @@ class MainWindow(QMainWindow):
             self._AutoSyncCategory(objGame)
 
     def _UpdateManageSteamGame(self, objGame: Optional[DetectedGame]) -> None:
-        """방송 관리 탭의 '지금 게임' 글자를 고쳐요."""
+        """방송 관리 칸의 '지금 게임' 글자를 고쳐요."""
         if objGame is None:
-            self.lblManageSteamGame.setText("지금 게임: 없음 (게임을 켜고 대시보드를 새로고침해 주세요)")
+            self.lblManageSteamGame.setText("지금 게임: 없음 (게임을 켜고 맨 위 [새로고침] 을 눌러 주세요)")
             return
         objEntry = self.objGameMap.Get(objGame.strGameId)
         strMapped = (f"<b>{objEntry.strCategoryValue or objEntry.strCategoryId}</b>" if objEntry
@@ -851,9 +1010,15 @@ class MainWindow(QMainWindow):
     def _ShowChzzk(self, objResult) -> None:
         if isinstance(objResult, Exception):
             self.lblChzzkStatus.setText(f"[경고] {objResult}")
+            self._SetChip(self.lblChipLive, "치지직 확인 실패", "warn")
             self.Log(f"[치지직] [경고] {objResult}")
             return
         objLive: ChzzkLiveStatus = objResult
+        self._SetChip(self.lblChipLive, "● 방송 중" if objLive.bIsLive else "방송 꺼짐", "live" if objLive.bIsLive else "off")
+        self._SetChip(self.lblChipViewers, f"시청자 {objLive.nConcurrentUserCount:,}명" if objLive.bIsLive else "시청자 -")
+        self.lblHeaderTitle.setText(objLive.strLiveTitle or "방송 제목 -")
+        strCategory = objLive.strLiveCategoryValue or objLive.strLiveCategory
+        self.lblHeaderCategory.setText(f"카테고리: {strCategory}" if strCategory else "")
         self.lblChzzkChannel.setText(objLive.strChannelName)
         self.lblChzzkStatus.setText("방송 중" if objLive.bIsLive else "방송 꺼짐")
         self.lblChzzkTitle.setText(objLive.strLiveTitle or "-")
@@ -995,8 +1160,8 @@ class MainWindow(QMainWindow):
         """
         objSteam = self.objCurrentGame
         if objSteam is None:
-            QMessageBox.information(self, "안내", "지금 하는 게임이 확인되지 않았어요. 대시보드를 새로고침해 보세요.\n"
-                                    "(목록에 없는 프로그램이면 [게임 짝] 탭 → '실행 중인 프로그램에서 고르기' 로 짝을 만들어 주세요)")
+            QMessageBox.information(self, "안내", "지금 하는 게임이 확인되지 않았어요. 맨 위 [새로고침] 을 눌러 보세요.\n"
+                                    "(목록에 없는 프로그램이면 [보기] → [게임 짝] → '실행 중인 프로그램에서' 로 짝을 만들어 주세요)")
             return
 
         objEntry = self.objGameMap.Get(objSteam.strGameId)
@@ -1129,7 +1294,7 @@ class MainWindow(QMainWindow):
         self.strLastAutoSyncGameId = objSteam.strGameId
 
         if self.objChzzkClient is None or not self.objChzzkClient.bIsLoggedIn:
-            self.Log("[안내] 자동 카테고리 변경은 치지직 로그인이 필요해요. [방송 관리] 탭에서 로그인해 주세요.")
+            self.Log("[안내] 자동 카테고리 변경은 치지직 로그인이 필요해요. 맨 위 [치지직 로그인] 을 눌러 주세요.")
             return
         objEntry = self.objGameMap.Get(objSteam.strGameId)
         if objEntry is None:
@@ -1168,13 +1333,14 @@ class MainWindow(QMainWindow):
     def _BuildGameMapTab(self) -> QWidget:
         objTab = QWidget()
         objLayout = QVBoxLayout(objTab)
-        objLayout.addWidget(QLabel(
-            "게임과 치지직 카테고리의 짝꿍 목록이에요. (data/game_map.txt)\n"
+        objLayout.setContentsMargins(0, 0, 0, 0)
+        objLayout.addWidget(self._HelpLabel(
+            "게임 ↔ 치지직 카테고리 짝 목록 (data/game_map.txt). "
             "스팀 게임은 gameid, 스팀 밖 게임(롤 · 발로란트 등)은 프로그램 이름(exe)으로 짝을 지어요."
         ))
 
         self.tblGameMap = QTableWidget(0, 4)
-        self.tblGameMap.setHorizontalHeaderLabels(["스팀 gameid / 프로그램", "게임 (메모)", "치지직 카테고리", "카테고리 ID"])
+        self.tblGameMap.setHorizontalHeaderLabels(["gameid / exe", "게임 (메모)", "치지직 카테고리", "카테고리 ID"])
         self.tblGameMap.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tblGameMap.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tblGameMap.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -1197,21 +1363,24 @@ class MainWindow(QMainWindow):
         objLayout.addLayout(objButtonRow)
 
         # --- 짝 추가 / 수정 ---
-        objEditBox = QGroupBox("짝 추가 / 수정  (목록에서 줄을 누르면 수정할 수 있어요)")
+        objEditBox = QGroupBox("짝 추가 / 수정  (목록에서 줄을 누르면 수정)")
         objEditForm = QFormLayout(objEditBox)
 
         self.editMapGameId = QLineEdit()
-        self.editMapGameId.setPlaceholderText("스팀 gameid 숫자 (예: 2622380) 또는 프로그램 이름 (예: VALORANT-Win64-Shipping.exe)")
-        btnLoadCurrentGame = QPushButton("지금 하는 게임 불러오기")
+        self.editMapGameId.setPlaceholderText("스팀 gameid (예: 2622380) 또는 exe 이름")
+        self.editMapGameId.setToolTip("예: 2622380 또는 VALORANT-Win64-Shipping.exe")
+        btnLoadCurrentGame = QPushButton("지금 하는 게임")
         btnLoadCurrentGame.clicked.connect(self.OnLoadCurrentGameForMapClicked)
-        btnPickProgram = QPushButton("실행 중인 프로그램에서 고르기")
+        btnPickProgram = QPushButton("실행 중인 프로그램에서")
         btnPickProgram.setToolTip("스팀 밖 게임용: 지금 창이 떠 있는 프로그램 목록에서 게임을 골라요.")
         btnPickProgram.clicked.connect(self.OnPickProgramForMapClicked)
         objGameIdRow = QHBoxLayout()
-        objGameIdRow.addWidget(self.editMapGameId)
+        objGameIdRow.addWidget(QLabel("불러오기:"))
         objGameIdRow.addWidget(btnLoadCurrentGame)
         objGameIdRow.addWidget(btnPickProgram)
-        objEditForm.addRow("gameid / 프로그램", objGameIdRow)
+        objGameIdRow.addStretch()
+        objEditForm.addRow("gameid / exe", self.editMapGameId)
+        objEditForm.addRow("", objGameIdRow)
 
         self.editMapMemo = QLineEdit()
         self.editMapMemo.setPlaceholderText("게임 이름 (메모용, 비워도 됨)")
@@ -1225,7 +1394,7 @@ class MainWindow(QMainWindow):
         objQueryRow = QHBoxLayout()
         objQueryRow.addWidget(self.editMapCategoryQuery)
         objQueryRow.addWidget(btnSearchMapCategory)
-        objEditForm.addRow("치지직 카테고리 검색", objQueryRow)
+        objEditForm.addRow("카테고리 검색", objQueryRow)
 
         self.cmbMapCategory = QComboBox()
         objEditForm.addRow("치지직 카테고리", self.cmbMapCategory)
@@ -1234,6 +1403,7 @@ class MainWindow(QMainWindow):
         btnClearMapForm = QPushButton("입력 지우기")
         btnClearMapForm.clicked.connect(self.OnClearMapFormClicked)
         btnSaveMap = QPushButton("짝 저장")
+        btnSaveMap.setObjectName("Primary")
         btnSaveMap.clicked.connect(self.OnSaveMapEntryClicked)
         objSaveRow.addStretch()
         objSaveRow.addWidget(btnClearMapForm)
@@ -1269,7 +1439,7 @@ class MainWindow(QMainWindow):
     def OnLoadCurrentGameForMapClicked(self) -> None:
         objSteam = self.objCurrentGame
         if objSteam is None:
-            QMessageBox.information(self, "안내", "지금 하는 게임이 확인되지 않았어요. 대시보드를 새로고침해 보세요.\n"
+            QMessageBox.information(self, "안내", "지금 하는 게임이 확인되지 않았어요. 맨 위 [새로고침] 을 눌러 보세요.\n"
                                     "(스팀 밖 게임이면 '실행 중인 프로그램에서 고르기' 를 눌러 보세요)")
             return
         self.editMapGameId.setText(KeyToDisplay(objSteam.strGameId))
@@ -1336,7 +1506,7 @@ class MainWindow(QMainWindow):
         objCategory = self.cmbMapCategory.currentData()
         if strGameId is None:
             QMessageBox.warning(self, "확인", "스팀 gameid(숫자) 또는 프로그램 이름(.exe 로 끝남)을 입력해 주세요.\n"
-                                "(대시보드 '지금 하는 게임' 의 [ ] 안 글자)")
+                                "([보기] → [방송 상태] '지금 하는 게임' 의 [ ] 안 글자)")
             return
         if objCategory is None:
             QMessageBox.warning(self, "확인", "치지직 카테고리를 검색해서 하나 골라 주세요.")
@@ -1467,6 +1637,7 @@ class MainWindow(QMainWindow):
         self.dictConfig["app"]["refresh_interval_sec"] = self.spinInterval.value()
         self.dictConfig["youtube"]["api_key"] = self.editYouTubeApiKey.text().strip()
         self.dictConfig["youtube"]["min_interval_sec"] = self.spinYouTubeInterval.value()
+        self.dictConfig["youtube"]["default_target"] = self.editYouTubeTarget.text().strip()
 
         # 다른 앱(Client)으로 바꿨다면, 예전 앱으로 받은 토큰은 쓸 수 없으니 지워요.
         if bClientChanged:
@@ -1531,7 +1702,7 @@ class MainWindow(QMainWindow):
     # 실시간 채팅창
     # ===================================================================
     def OnOpenChatWindowClicked(self) -> None:
-        """방송 도우미 창(채팅 + 후원 · 미션)을 열어요. 이미 열려 있으면 앞으로 가져와요. 로그인돼 있으면 바로 연결!"""
+        """방송 도우미(채팅 + 후원 · 미션)를 보여줘요. 메인 화면 가운데에 있어서 메인 창을 앞으로 가져와요."""
         self.objStreamWindow.ShowTab()
 
     def OnOpenDonationWindowClicked(self) -> None:
@@ -1542,18 +1713,10 @@ class MainWindow(QMainWindow):
         """방송 도우미 창을 [미션] 탭으로 열어요."""
         self.objStreamWindow.ShowTab(N_TAB_MISSION)
 
-    def _SaveYouTubeTarget(self, strTarget: str) -> None:
-        """마지막에 연결한 유튜브 방송 주소를 기억해요. (다음에 채팅창을 열면 채워져 있게)"""
-        self.dictConfig["youtube"]["default_target"] = strTarget
-        try:
-            SaveConfig(self.dictConfig)
-        except OSError as objError:
-            self.Log(f"[경고] 설정 저장 실패: {objError}")
-
     def _UpdateStreamButton(self, nPending: int, nMissions: int) -> None:
-        """대시보드 '후원 · 미션' 버튼에 숫자를 보여줘요."""
+        """창 제목에 후원 대기 · 미션 수를 보여줘요. (작업 표시줄에서도 보여요)"""
         listParts = ([f"대기 {nPending}"] if nPending else []) + ([f"미션 {nMissions}"] if nMissions else [])
-        self.btnOpenDonationDash.setText("방송 도우미" + (f" ({' · '.join(listParts)})" if listParts else ""))
+        self.setWindowTitle("치지직 방송 도우미" + (f" ({' · '.join(listParts)})" if listParts else ""))
 
     def closeEvent(self, objEvent) -> None:  # noqa: N802 (Qt 가 정한 이름)
         """메인 창을 닫으면 방송 도우미 창도 닫고 연결도 끊어요."""

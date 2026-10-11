@@ -19,15 +19,16 @@
 """
 
 import html
+import re
 import zlib
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Callable, Optional
 
 # [중요] socketio 는 반드시 PySide6 보다 "먼저" 불러와야 해요.
 # (PySide6 를 먼저 부르면 socketio 가 쓰는 six 라이브러리와 충돌해서 프로그램이 꺼져요)
 import socketio  # noqa: F401  (순서 맞추기용)
 from PySide6.QtCore import QPoint, Qt, QUrl
-from PySide6.QtGui import QCursor, QFont, QTextCursor
+from PySide6.QtGui import QColor, QCursor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox,
     QTextBrowser, QVBoxLayout, QWidget,
@@ -44,6 +45,12 @@ from youtube import N_DAILY_QUOTA, YouTubeChatMessage
 N_MAX_CHAT_LINES = 500  # 이보다 많아지면 오래된 줄부터 지워요 (메모리 아끼기)
 N_MAX_KEPT_MESSAGES = 1000  # 닉네임 메뉴(제한 · 가리기)에 쓰려고 기억해 두는 최근 채팅 수
 STR_MSG_LINK_PREFIX = "msg:"  # 채팅 줄 링크 모양: msg:번호
+
+# 채팅 줄은 색 자리표시를 넣어 기억해 두고, 화면에 넣을 때 지금 색으로 바꿔요.
+# (색상 설정을 바꾸면 이미 보이는 채팅도 새 색으로 다시 그릴 수 있게)
+STR_TEXT_COLOR_TOKEN = "@@TEXT@@"                  # 채팅 글자색
+RE_NICK_COLOR_TOKEN = re.compile(r"@@NICK(#[0-9a-fA-F]{6})@@")  # 닉네임 색 (어두운 배경이면 밝게)
+STR_DONATION_TEXT = "#1f2937"                      # 노란 후원 줄 안의 글자는 배경이 늘 밝아서 진하게 고정
 
 # 닉네임 색깔표 (흰 바탕에서 잘 읽히는 색들). 같은 사람은 항상 같은 색이 나와요.
 LIST_NICK_COLORS = [
@@ -77,8 +84,7 @@ class ChatWindow(QWidget):
 
     def __init__(self, objHub: ChatHub,
                  fnLog: Optional[Callable[[str], None]] = None, objParent: Optional[QWidget] = None,
-                 objYouTubeHub=None, fnSaveYouTubeTarget: Optional[Callable[[str], None]] = None,
-                 strYouTubeTarget: str = ""):
+                 objYouTubeHub=None, fnGetYouTubeTarget: Optional[Callable[[], str]] = None):
         super().__init__(objParent, Qt.WindowType.Window)
         self.setWindowTitle("치지직 채팅")
         self.resize(420, 640)
@@ -101,10 +107,10 @@ class ChatWindow(QWidget):
 
         # 유튜브 채팅 (있으면): [YT] 로 섞어서 보여줘요. 슈퍼챗은 노란 줄로.
         self.objYouTubeHub = objYouTubeHub
-        self.fnSaveYouTubeTarget = fnSaveYouTubeTarget or (lambda strTarget: None)
+        # 유튜브 방송 주소는 [설정] 에서 넣어요. 연결할 때마다 지금 저장된 주소를 읽어요.
+        self.fnGetYouTubeTarget = fnGetYouTubeTarget or (lambda: "")
         self.wgtYouTubeRow.setVisible(objYouTubeHub is not None)
         if objYouTubeHub is not None:
-            self.editYouTube.setText(strYouTubeTarget)
             objYouTubeHub.sigChat.connect(self._AppendYouTubeChat)
             objYouTubeHub.sigDonation.connect(self._AppendDonation)
             objYouTubeHub.sigStatus.connect(self._OnYouTubeStatus)
@@ -135,26 +141,22 @@ class ChatWindow(QWidget):
         self.lblStatusDetail.hide()
         objLayout.addWidget(self.lblStatusDetail)
 
-        # --- 유튜브 채팅 연결 줄 (유튜브 공식 API) ---
+        # --- 유튜브 채팅 줄 (유튜브 공식 API): [YT] 상태 · 오늘 사용량 + 연결 버튼. 주소는 [설정] 에서 ---
         self.wgtYouTubeRow = QWidget()
         objYouTubeRow = QHBoxLayout(self.wgtYouTubeRow)
         objYouTubeRow.setContentsMargins(0, 0, 0, 0)
         lblYouTubeTag = QLabel("<span style='background:#ff0000; color:#ffffff'>&nbsp;YT&nbsp;</span>")
-        self.editYouTube = QLineEdit()
-        self.editYouTube.setPlaceholderText("유튜브 방송 주소 (또는 @채널이름)")
-        self.editYouTube.returnPressed.connect(self.OnYouTubeConnectClicked)
-        self.btnYouTube = QPushButton("유튜브 연결")
-        self.btnYouTube.clicked.connect(self.OnYouTubeConnectClicked)
-        objYouTubeRow.addWidget(lblYouTubeTag)
-        objYouTubeRow.addWidget(self.editYouTube, 1)
-        objYouTubeRow.addWidget(self.btnYouTube)
-        objLayout.addWidget(self.wgtYouTubeRow)
         self.lblYouTubeStatus = QLabel("")
         self.lblYouTubeStatus.setWordWrap(True)
         self.lblYouTubeStatus.setStyleSheet("color: #6b7280;")
-        objLayout.addWidget(self.lblYouTubeStatus)
+        self.btnYouTube = QPushButton("유튜브 연결")
+        self.btnYouTube.setToolTip("[설정] 에 저장한 유튜브 방송 주소로 연결해요.")
+        self.btnYouTube.clicked.connect(self.OnYouTubeConnectClicked)
+        objYouTubeRow.addWidget(lblYouTubeTag)
+        objYouTubeRow.addWidget(self.lblYouTubeStatus, 1)
+        objYouTubeRow.addWidget(self.btnYouTube)
+        objLayout.addWidget(self.wgtYouTubeRow)
         self.wgtYouTubeRow.hide()
-        self.lblYouTubeStatus.hide()
 
         # --- 옵션 줄 ---
         objOptionRow = QHBoxLayout()
@@ -170,7 +172,7 @@ class ChatWindow(QWidget):
         self.spinFontSize.setPrefix("글자 ")
         self.spinFontSize.valueChanged.connect(self.OnFontSizeChanged)
         btnClear = QPushButton("지우기")
-        btnClear.clicked.connect(lambda: self.txtChat.clear())
+        btnClear.clicked.connect(self.OnClearClicked)
         btnRestrictList = QPushButton("제한 목록")
         btnRestrictList.setToolTip("활동 제한한 시청자를 보고 풀어줘요.")
         btnRestrictList.clicked.connect(self.OnRestrictListClicked)
@@ -187,7 +189,10 @@ class ChatWindow(QWidget):
         self.txtChat = QTextBrowser()
         self.txtChat.setOpenLinks(False)
         self.txtChat.document().setMaximumBlockCount(N_MAX_CHAT_LINES)
-        self.txtChat.setStyleSheet("QTextBrowser { background: #ffffff; color: #1f2937; }")
+        self.txtChat.setObjectName("Chat")  # 배경 · 글자색은 gui/theme.py 에서
+        self.dequeChatHtml = deque(maxlen=N_MAX_CHAT_LINES)  # 다시 그리기용 채팅 줄 (색 자리표시 그대로)
+        self.strTextColor = "#1f2937"
+        self.bDarkBackground = False
         self.txtChat.setToolTip("닉네임을 누르거나 채팅을 우클릭하면 임시 제한 · 가리기 메뉴가 떠요.")
         # 닉네임(링크)을 누르면 → 시청자 메뉴
         self.txtChat.anchorClicked.connect(self._OnChatLinkClicked)
@@ -287,9 +292,9 @@ class ChatWindow(QWidget):
         strLink = f"{STR_MSG_LINK_PREFIX}{self._RememberMessage(objMessage)}"
         strHtml = (f"{self._TimeHtml(objMessage.dtTime)}{strRole}"
                    f"<a href='{strLink}' style='text-decoration:none'>"
-                   f"<b style='color:{strNickColor}'>{html.escape(objMessage.strNickname)}</b></a>"
+                   f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b></a>"
                    f"<span style='color:#9ca3af'> : </span>"
-                   f"<a href='{strLink}' style='text-decoration:none'><span style='color:#1f2937'>"
+                   f"<a href='{strLink}' style='text-decoration:none'><span style='color:{STR_TEXT_COLOR_TOKEN}'>"
                    f"{self._ContentHtml(objMessage.strContent)}</span></a>")
         self._AppendHtml(strHtml)
 
@@ -310,9 +315,7 @@ class ChatWindow(QWidget):
         if self.objYouTubeHub.bIsRunning:
             self.objYouTubeHub.Disconnect()
             return
-        strTarget = self.editYouTube.text().strip()
-        if self.objYouTubeHub.Connect(strTarget):
-            self.fnSaveYouTubeTarget(strTarget)  # 다음에 열면 이 주소가 채워져 있게
+        self.objYouTubeHub.Connect(self.fnGetYouTubeTarget().strip())
 
     def _OnYouTubeStatus(self, strState: str, strMessage: str) -> None:
         dictView = {"connecting": ("#e67700", "연결 중..."), "connected": ("#2f9e44", "연결됨"),
@@ -326,9 +329,8 @@ class ChatWindow(QWidget):
         strDetail = strMessage if strState in ("error", "reconnecting") and strMessage else             (getattr(self, "strYouTubeLastError", "") if strState in ("stopped", "error") else "")
         nUsed = self.objYouTubeHub.nQuotaUsed if self.objYouTubeHub is not None else 0
         strQuota = f" · 오늘 사용량 약 {nUsed:,} / {N_DAILY_QUOTA:,}"
-        self.lblYouTubeStatus.setText(f"<span style='color:{strColor}'>● 유튜브 {strText}</span>{strQuota}"
+        self.lblYouTubeStatus.setText(f"<span style='color:{strColor}'>● {strText}</span>{strQuota}"
                                       + (f"<br><span style='color:#e03131'>{html.escape(strDetail)}</span>" if strDetail else ""))
-        self.lblYouTubeStatus.setVisible(self.objYouTubeHub is not None)
         bRunning = strState in ("connecting", "connected", "reconnecting")
         self.btnYouTube.setText("유튜브 끊기" if bRunning else "유튜브 연결")
         if strMessage:
@@ -344,19 +346,21 @@ class ChatWindow(QWidget):
         strNickColor = self._NickColor("yt:" + (objMessage.strAuthorChannelId or objMessage.strNickname))
         strHtml = (f"{self._TimeHtml(objMessage.dtTime)}"
                    f"<span style='background:#ff0000; color:#ffffff'>&nbsp;YT&nbsp;</span> {strRole}"
-                   f"<b style='color:{strNickColor}'>{html.escape(objMessage.strNickname)}</b>"
-                   f"<span style='color:#9ca3af'> : </span>{html.escape(objMessage.strText)}")
+                   f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b>"
+                   f"<span style='color:#9ca3af'> : </span>"
+                   f"<span style='color:{STR_TEXT_COLOR_TOKEN}'>{html.escape(objMessage.strText)}</span>")
         self._AppendHtml(strHtml)
 
     def _AppendDonation(self, objDonation: ChzzkDonationMessage) -> None:
         strKind = {"VIDEO": "영상 후원", "MISSION": "미션 후원", "YOUTUBE": "[YT] 슈퍼챗"}.get(objDonation.strDonationType, "후원")
         strText = self._ContentHtml(objDonation.strText) if objDonation.strText else ""
         strTestTag = "<span style='color:#868e96'>(테스트)</span> " if objDonation.bTest else ""
-        strHtml = (f"<table width='100%' cellpadding='4' style='background:#fff3bf'><tr><td>"
+        strHtml = (f"<table width='100%' cellpadding='4' style='background:#fff3bf; color:{STR_DONATION_TEXT}'>"
+                   f"<tr><td style='color:{STR_DONATION_TEXT}'>"
                    f"{self._TimeHtml(objDonation.dtTime)}"
                    f"{strTestTag}"
                    f"<b style='color:#e67700'>{strKind} {self._AmountText(objDonation)}</b> "
-                   f"<b>{html.escape(objDonation.strNickname)}</b>"
+                   f"<b style='color:{STR_DONATION_TEXT}'>{html.escape(objDonation.strNickname)}</b>"
                    f"{'<br>' + strText if strText else ''}</td></tr></table>")
         self._AppendHtml(strHtml)
         self.fnLog(f"[후원] {objDonation.strNickname} {objDonation.nPayAmount:,}원")
@@ -372,11 +376,34 @@ class ChatWindow(QWidget):
     def _AppendSystem(self, strMessage: str) -> None:
         self._AppendHtml(f"<span style='color:#9ca3af'>— {html.escape(strMessage)} —</span>")
 
+    def _RenderHtml(self, strHtml: str) -> str:
+        """색 자리표시 → 지금 색. 어두운 배경이면 닉네임 색을 밝게 해서 잘 보이게 해요."""
+        strHtml = strHtml.replace(STR_TEXT_COLOR_TOKEN, self.strTextColor)
+        if self.bDarkBackground:
+            return RE_NICK_COLOR_TOKEN.sub(lambda objMatch: QColor(objMatch.group(1)).lighter(150).name(), strHtml)
+        return RE_NICK_COLOR_TOKEN.sub(lambda objMatch: objMatch.group(1), strHtml)
+
+    def SetColors(self, strBackground: str, strText: str) -> None:
+        """색상 설정이 바뀌면 불려요. 이미 보이는 채팅도 새 색으로 다시 그려요."""
+        self.strTextColor = strText
+        objBackground = QColor(strBackground)
+        self.bDarkBackground = (0.299 * objBackground.red() + 0.587 * objBackground.green()
+                                + 0.114 * objBackground.blue()) < 128
+        self.txtChat.clear()
+        for strHtml in self.dequeChatHtml:
+            self.txtChat.append(self._RenderHtml(strHtml))
+        self.txtChat.moveCursor(QTextCursor.MoveOperation.End)
+
+    def OnClearClicked(self) -> None:
+        self.dequeChatHtml.clear()
+        self.txtChat.clear()
+
     def _AppendHtml(self, strHtml: str) -> None:
         objScrollBar = self.txtChat.verticalScrollBar()
         # 사용자가 위로 올려서 예전 채팅을 보는 중이면, 아래로 끌어내리지 않아요.
         bAtBottom = objScrollBar.value() >= objScrollBar.maximum() - 4
-        self.txtChat.append(strHtml)
+        self.dequeChatHtml.append(strHtml)
+        self.txtChat.append(self._RenderHtml(strHtml))
         if self.chkAutoScroll.isChecked() and bAtBottom:
             self.txtChat.moveCursor(QTextCursor.MoveOperation.End)
             objScrollBar.setValue(objScrollBar.maximum())

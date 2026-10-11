@@ -81,7 +81,7 @@ def Main() -> None:
 
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QFont, QFontDatabase
-    from PySide6.QtWidgets import QApplication, QMenu, QTabWidget
+    from PySide6.QtWidgets import QApplication, QMenu
     from chzzk import ChzzkDonationMessage, ChzzkLiveStatus, ChzzkLiveSetting, ParseChatMessage
     from steam import SteamApiClient
 
@@ -105,10 +105,10 @@ def Main() -> None:
             mock.patch.object(mw.MainWindow, "OnLoadSettingClicked", lambda self: None), \
             mock.patch.object(mw.MainWindow, "_AutoSyncCategory", lambda self, objGame: None):
         objWin = mw.MainWindow()
-        objWin.resize(780, 720)
-        objTabs = objWin.centralWidget().findChild(QTabWidget)
+        objWin.resize(1280, 800)
+        objWin.show()
 
-        # ---------------------------------------------------------------- 대시보드
+        # ---------------------------------------------------------------- 맨 위 막대 · 방송 상태
         objSteam = SteamApiClient.ParsePlayerSummary({"steamid": "76561198012345678", "personaname": "스트리머닉네임",
                                                       "personastate": 1, "communityvisibilitystate": 3,
                                                       "gameid": "2622380", "gameextrainfo": "ELDEN RING NIGHTREIGN"})
@@ -116,42 +116,19 @@ def Main() -> None:
         objWin.setLastRunningExes = set()
         objWin._UpdateCurrentGame(bAutoSync=False)
         objWin._ShowChzzk(ChzzkLiveStatus("c", "내 방송국", "OPEN", "오늘도 나이트레인!", "GAME", "Elden_Ring_Nightreign",
-                                          "ELDEN RING 밤의 통치자", 12, None, "live-detail"))
+                                          "ELDEN RING 밤의 통치자", 128, None, "live-detail"))
+        objWin._ShowLiveSetting(ChzzkLiveSetting("오늘도 나이트레인!", "GAME", "Elden_Ring_Nightreign", "ELDEN RING 밤의 통치자",
+                                                 ["엘든링", "소울라이크"]))
         objWin.lblLastUpdated.setText("마지막 갱신 21:00:00")
         objWin.txtLog.clear()
         for strLine in ["[스팀] 스트리머닉네임 님은 지금 [ELDEN RING NIGHTREIGN] (ID: 2622380) 플레이 중!",
-                        "[치지직] 방송 중 / 출처: live-detail", "[후원] 후원 받기 자동 시작 — 후원 목록 창을 안 열어도 기록돼요."]:
+                        "[후원] 후원 받기 자동 시작 — 후원 목록 창을 안 열어도 기록돼요.",
+                        "[치지직] 방송 중 / 출처: live-detail"]:
             objWin.Log(strLine)
-        objTabs.setCurrentIndex(0)
-        Save(objWin, "dashboard_tab.png")
 
-        # ---------------------------------------------------------------- 방송 관리 (스크롤 안쪽 전체)
-        objWin._ShowLiveSetting(ChzzkLiveSetting("오늘도 나이트레인!", "GAME", "Elden_Ring_Nightreign", "ELDEN RING 밤의 통치자",
-                                                 ["엘든링", "소울라이크"]))
-        objTabs.setCurrentIndex(1)
-        Pump()
-        objInner = objTabs.currentWidget().widget()
-        objInner.resize(760, objInner.sizeHint().height())
-        Save(objInner, "manage_tab.png")
-
-        # ---------------------------------------------------------------- 게임 짝
-        objTabs.setCurrentIndex(2)
-        objWin.editMapGameId.setText("VALORANT-Win64-Shipping.exe")
-        objWin.editMapMemo.setText("발로란트")
-        objWin.editMapCategoryQuery.setText("발로란트")
-        from chzzk import ChzzkCategory
-        objWin.cmbMapCategory.addItem("발로란트  [GAME]", ChzzkCategory("GAME", "Valorant", "발로란트"))
-        Save(objWin, "gamemap_tab.png")
-
-        # ---------------------------------------------------------------- 설정
-        objTabs.setCurrentIndex(3)
-        Save(objWin, "settings_tab.png")
-
-        # ---------------------------------------------------------------- 방송 도우미 (채팅 + 후원 + 미션)
-        objStream = objWin.objStreamWindow
-        objWin.OnOpenChatWindowClicked()
-        Pump()
+        # ---------------------------------------------------------------- 메인 화면 (채팅 + 후원 + 미션)
         objHub = objWin.objChatHub
+        objHub.sigStatus.emit("connected", "")
         dtNow = datetime.now()
         for strNick, strText, strRole in [("스트리머닉네임", "어서오세요~ 오늘은 나이트레인!", "streamer"),
                                           ("매니저", "공지 확인 부탁드려요", "streaming_channel_manager"),
@@ -162,7 +139,7 @@ def Main() -> None:
                                                   "userRoleCode": strRole, "profile": {"nickname": strNick}}))
         # 유튜브 채팅 (동시 송출) — 가짜로 몇 줄
         from youtube import YouTubeChatMessage
-        objWin.objChatWindow.editYouTube.setText("https://www.youtube.com/live/xxxxxxxxxxx")
+        objWin.editYouTubeTarget.setText("https://www.youtube.com/live/xxxxxxxxxxx")
         objWin.objYouTubeHub.sigStatus.emit("connected", "")
         for strNick, strText, bMember in [("YT시청자", "유튜브에서 왔어요!", False), ("멤버님", "오늘도 화이팅", True)]:
             objWin.objYouTubeHub.sigChat.emit(YouTubeChatMessage(strNick, strText, dtNow, bMember=bMember))
@@ -185,10 +162,48 @@ def Main() -> None:
         objMissionView._ToggleRun([0])
         objMissionView.listMissions[0].fEndAt = time.time() + 437  # 07:17 남은 것처럼
         objMissionView._OnTick()
-        objStream.resize(1240, 820)
         objWin.objDonationWindow.tblDonations.clearSelection()
         objMissionView.tblMissions.clearSelection()
-        Save(objStream, "stream_window.png")
+        Save(objWin, "main_window.png")
+
+        # ---------------------------------------------------------------- 메뉴 (방송 · 보기 · 설정)
+        for nIndex, strName in enumerate(["menu_broadcast.png", "menu_view.png", "menu_settings.png"]):
+            objMenu = objWin.menuBar().actions()[nIndex].menu()
+            objMenu.adjustSize()
+            objMenu.ensurePolished()
+            Save(objMenu, strName)
+
+        # ---------------------------------------------------------------- 메뉴에서 여는 창들
+        objWin._OpenWindow(objWin.dlgManage)
+        Save(objWin.dlgManage, "manage_window.png")
+        objWin.dlgManage.close()
+        objWin._OpenWindow(objWin.dlgStatus)
+        objWin.dlgStatus.resize(460, 400)
+        Save(objWin.dlgStatus, "status_window.png")
+        objWin.dlgStatus.close()
+
+        objWin.editMapGameId.setText("VALORANT-Win64-Shipping.exe")
+        objWin.editMapMemo.setText("발로란트")
+        objWin.editMapCategoryQuery.setText("발로란트")
+        from chzzk import ChzzkCategory
+        objWin.cmbMapCategory.addItem("발로란트  [GAME]", ChzzkCategory("GAME", "Valorant", "발로란트"))
+        objWin._OpenWindow(objWin.dlgGameMap)
+        Save(objWin.dlgGameMap, "gamemap_window.png")
+        objWin.dlgGameMap.close()
+
+        objWin.OnOpenSettingsClicked()
+        Save(objWin.dlgSettings, "settings_window.png")
+        objWin.dlgSettings.close()
+
+        # 색상 창 (고르는 동안 화면 전체가 바뀌어요 → 찍은 뒤 원래 색으로)
+        from gui.theme import ThemeDialog
+        objTheme = ThemeDialog({"preset": "치지직 그린"}, fnPreview=objWin._ApplyTheme, parent=objWin)
+        objTheme.show()
+        Save(objTheme, "theme_dialog.png")
+        Save(objWin, "main_window_dark.png")
+        objTheme.reject()
+        objWin._ApplyTheme()
+        Pump()
 
         # ---------------------------------------------------------------- 미션 설정 펼친 모습
         objMissionView._ToggleSettings()
@@ -226,7 +241,7 @@ def Main() -> None:
         Save(objWarn, "donation_warning.png")
 
         objMissionView.Shutdown()
-        objStream.close()
+        objWin.close()
     shutil.rmtree(TMP, ignore_errors=True)
 
 

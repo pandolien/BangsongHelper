@@ -37,7 +37,7 @@ DICT_REASON_TEXT = {
     "quotaExceeded": "오늘 유튜브 API 사용량(10,000점)을 다 썼어요. 한국 시간 오후 4~5시쯤 다시 채워져요.",
     "dailyLimitExceeded": "오늘 유튜브 API 사용량을 다 썼어요. 한국 시간 오후 4~5시쯤 다시 채워져요.",
     "rateLimitExceeded": "유튜브에 너무 자주 요청했어요. 잠시 후 다시 시도해요.",
-    "keyInvalid": "유튜브 API 키가 올바르지 않아요. [설정] 탭의 키를 확인해 주세요.",
+    "keyInvalid": "유튜브 API 키가 올바르지 않아요. [설정] 메뉴의 키를 확인해 주세요.",
     "keyExpired": "유튜브 API 키가 만료됐어요. Google Cloud 에서 새 키를 만들어 주세요.",
     "accessNotConfigured": "Google Cloud 프로젝트에서 'YouTube Data API v3' 를 사용 설정해 주세요.",
     "liveChatEnded": "방송이 끝나서 채팅이 닫혔어요.",
@@ -194,7 +194,7 @@ class YouTubeApiClient:
                  fnOnQuota=None):
         strApiKey = (strApiKey or "").strip()
         if not strApiKey:
-            raise YouTubeApiError("유튜브 API 키가 비어 있어요. [설정] 탭에서 넣어 주세요.", "keyMissing")
+            raise YouTubeApiError("유튜브 API 키가 비어 있어요. [설정] 메뉴에서 넣어 주세요.", "keyMissing")
         self.strApiKey = strApiKey
         self.fTimeoutSec = fTimeoutSec
         self.fnOnQuota = fnOnQuota or (lambda nCost: None)

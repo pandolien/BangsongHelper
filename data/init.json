@@ -51,6 +51,16 @@
     "auto_sync_category": false,
     "auto_donation": true,
     "auto_fallback_various": true,
-    "auto_detect_folder_games": true
+    "auto_detect_folder_games": true,
+    "mission_default_min": 10,
+    "mission_prefix_enabled": true,
+    "mission_prefix": "미션",
+    "mission_sound": true,
+    "mission_timer_file": true,
+    "mission_chat_announce": false
+  },
+  "theme": {
+    "preset": "다크",
+    "colors": {}
   }
 }

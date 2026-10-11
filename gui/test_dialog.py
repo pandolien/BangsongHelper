@@ -204,10 +204,10 @@ class TestDialog(QDialog):
         self.txtCheck.clear()
         objClient = self.objHub.fnGetClient()
         if objClient is None:
-            self._CheckLog("[실패] 치지직 Client ID / Secret 이 없어요. [설정] 탭에서 입력해 주세요.")
+            self._CheckLog("[실패] 치지직 Client ID / Secret 이 없어요. 메인 창 [설정] 메뉴에서 입력해 주세요.")
             return
         if not objClient.bIsLoggedIn:
-            self._CheckLog("[실패] 로그인 안 됨 → [방송 관리] 탭에서 [치지직 로그인] 을 눌러 주세요.")
+            self._CheckLog("[실패] 로그인 안 됨 → 메인 창 맨 위 [치지직 로그인] 을 눌러 주세요.")
             return
         self._CheckLog("[성공] 1. 로그인 돼 있어요.")
         self._CheckLog("[진행] 2. 채팅 서버 접속 주소를 받는 중...")

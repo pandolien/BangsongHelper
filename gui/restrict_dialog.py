@@ -79,7 +79,7 @@ class RestrictDialog(QDialog):
     def _Client(self) -> Optional[ChzzkApiClient]:
         objClient = self.fnGetClient()
         if objClient is None or not objClient.bIsLoggedIn:
-            self.lblInfo.setText("치지직 로그인이 필요해요. 메인 창 [방송 관리] 탭에서 로그인해 주세요.")
+            self.lblInfo.setText("치지직 로그인이 필요해요. 메인 창 맨 위 [치지직 로그인] 을 눌러 주세요.")
             return None
         return objClient
 

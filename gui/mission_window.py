@@ -477,8 +477,9 @@ class MissionWindow(QWidget):
         objStateItem.setForeground(QBrush(QColor(strColor)))
         objLeftItem = self.tblMissions.item(nRow, N_COL_LEFT)
         objLeftItem.setText("-" if objMission.bFinished else FormatSec(objMission.fLeftSec))
-        objLeftItem.setForeground(QBrush(QColor("#e03131" if objMission.strState == "timeout" else
-                                                "#1971c2" if objMission.strState == "run" else "#1f2937")))
+        strLeftColor = {"timeout": "#e03131", "run": "#1971c2"}.get(objMission.strState, "")
+        # 그 밖에는 기본 글자색 (색상 설정을 따라가요)
+        objLeftItem.setForeground(QBrush(QColor(strLeftColor)) if strLeftColor else QBrush())
         strTextColor = "#9ca3af" if objMission.bFinished else ""
         for nCol in (N_COL_TIME, N_COL_NICK, N_COL_AMOUNT, N_COL_TEXT):
             self.tblMissions.item(nRow, nCol).setForeground(QBrush(QColor(strTextColor)) if strTextColor else QBrush())

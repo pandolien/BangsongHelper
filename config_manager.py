@@ -63,6 +63,8 @@ DICT_DEFAULT_CONFIG = {
     # auto_detect_folder_games: 게임 설치 폴더(에픽 · 넥슨 등)에서 실행된 프로그램도 게임으로 알아보기
     "app": {"refresh_interval_sec": 30, "auto_sync_category": False, "auto_donation": True, "auto_fallback_various": True,
             "auto_detect_folder_games": True},
+    # 화면 색: 색 묶음 이름 + 그 묶음에서 바꾼 색만 (gui/theme.py)
+    "theme": {"preset": "라이트", "colors": {}},
 }
 
 

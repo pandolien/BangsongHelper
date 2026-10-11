@@ -80,7 +80,7 @@ class YouTubeHub(QObject):
             self.sigStatus.emit("error", str(objError))
             return False
         if not strInput.strip():
-            self.sigStatus.emit("error", "유튜브 방송 주소(또는 @채널이름)를 넣어 주세요.")
+            self.sigStatus.emit("error", "[설정] → 유튜브 방송 주소(또는 @채널이름)를 넣고 저장해 주세요.")
             return False
         self.Disconnect()
         objSession = YouTubeChatSession(objClient, strInput.strip(),

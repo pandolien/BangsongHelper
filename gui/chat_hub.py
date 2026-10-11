@@ -58,7 +58,7 @@ class ChatHub(QObject):
         """연결해요. 로그인이 안 돼 있으면 오류 상태를 알리고 False."""
         objClient = self.fnGetClient()
         if objClient is None or not objClient.bIsLoggedIn:
-            self.sigStatus.emit("error", "치지직 로그인이 필요해요. 메인 창 [방송 관리] 탭에서 로그인해 주세요.")
+            self.sigStatus.emit("error", "치지직 로그인이 필요해요. 메인 창 맨 위 [치지직 로그인] 을 눌러 주세요.")
             return False
         self._StopSession()
         self.sigDonationState.emit(None, "")  # 새 연결이니 후원 신청 결과는 다시 확인해요.
