@@ -182,7 +182,6 @@ class MainWindow(QMainWindow):
         self.objMissionWindow = MissionWindow(self.objChatHub, fnLog=self.Log, dictApp=self.dictConfig["app"],
                                               fnSaveConfig=lambda: SaveConfig(self.dictConfig))
         self.objDonationWindow.fnMakeMission = self.objMissionWindow.AddFromDonationRecord
-        self.objDonationWindow.fnRemoveTestMissions = self.objMissionWindow.RemoveTestMissions
         # 채팅 + 후원 목록 + 미션을 한 화면에 합친 '방송 도우미' 창
         # 유튜브 채팅 (공식 Data API, API 키 필요). 슈퍼챗은 후원 목록 · 미션에도 들어가요.
         self.objYouTubeHub = YouTubeHub(fnGetConfig=lambda: self.dictConfig)

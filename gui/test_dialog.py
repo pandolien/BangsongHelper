@@ -2,33 +2,28 @@
 테스트 도구 창
 ==============
 
-실제 후원이나 문제 상황을 기다리지 않고, 프로그램이 제대로 반응하는지 시험해 보는 창이에요.
+문제 상황을 기다리지 않고 화면이 어떻게 알려주는지 보거나, 치지직 연결을 점검하는 창이에요.
+(후원이 실제로 들어오는지는 치지직 스튜디오의 테스트 후원으로 확인해요)
 
-① 가짜 후원 · 채팅 보내기
-    - 내 프로그램 안에서만 보여요. (치지직에는 아무것도 안 보내요)
-    - 후원 목록 · 채팅창에 '(테스트)' 로 표시되고, 파일에 저장되지 않아요.
-
-② 실패 상황 흉내
+① 실패 상황 흉내
     - 후원 권한 없음(403) / 연결 끊김 → 다시 연결 / 연결 오류 / 로그인 풀림
     - 화면이 어떻게 알려주는지 확인하고 [원래 상태로] 로 되돌려요.
 
-③ 실제 연결 점검
+② 실제 연결 점검
     - 치지직에 진짜로 접속해서 로그인 → 접속 주소 → 채팅 받기 → 후원 받기 를 하나씩 확인해요.
     - 점검용으로 연결을 하나 더 잠깐 써요. (치지직은 한 사람당 동시에 3개까지)
 """
 
-from datetime import datetime
 from typing import Callable, Optional
 
 # [중요] socketio 는 반드시 PySide6 보다 "먼저" 불러와야 해요.
 import socketio  # noqa: F401  (순서 맞추기용)
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox,
-    QVBoxLayout, QWidget,
+    QDialog, QGridLayout, QGroupBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
-from chzzk import ChzzkChatMessage, ChzzkChatSession, ChzzkDonationMessage
+from chzzk import ChzzkChatSession
 from gui.chat_hub import ChatHub
 
 N_CHECK_TIMEOUT_MS = 15000   # 실제 연결 점검을 최대 몇 초 기다릴지
@@ -47,7 +42,7 @@ class TestDialog(QDialog):
                  objParent: Optional[QWidget] = None):
         super().__init__(objParent)
         self.setWindowTitle("테스트 도구")
-        self.resize(560, 620)
+        self.resize(560, 480)
         self.objHub = objHub
         self.fnLog = fnLog or (lambda strMessage: None)
         self.objCheckSession: Optional[ChzzkChatSession] = None
@@ -66,38 +61,8 @@ class TestDialog(QDialog):
     def _BuildUi(self) -> None:
         objLayout = QVBoxLayout(self)
 
-        # --- ① 가짜 후원 · 채팅 ---
-        objFakeBox = QGroupBox("① 가짜 후원 · 채팅 보내기 (내 프로그램에서만 보여요, 저장 안 됨)")
-        objFakeGrid = QGridLayout(objFakeBox)
-        self.editNick = QLineEdit("테스트시청자")
-        self.spinAmount = QSpinBox()
-        self.spinAmount.setRange(0, 10_000_000)
-        self.spinAmount.setSingleStep(1000)
-        self.spinAmount.setValue(1000)
-        self.spinAmount.setSuffix(" 원")
-        self.editText = QLineEdit("테스트 영상 제목 / 후원 메시지")
-        objFakeGrid.addWidget(QLabel("닉네임"), 0, 0)
-        objFakeGrid.addWidget(self.editNick, 0, 1)
-        objFakeGrid.addWidget(QLabel("금액"), 0, 2)
-        objFakeGrid.addWidget(self.spinAmount, 0, 3)
-        objFakeGrid.addWidget(QLabel("내용"), 1, 0)
-        objFakeGrid.addWidget(self.editText, 1, 1, 1, 3)
-        objFakeRow = QHBoxLayout()
-        for strLabel, strType in (("영상 후원", "VIDEO"), ("채팅 후원", "CHAT"), ("미션 후원", "MISSION")):
-            btnItem = QPushButton(strLabel)
-            btnItem.clicked.connect(lambda _=False, strType=strType: self.SendFakeDonation(strType))
-            objFakeRow.addWidget(btnItem)
-        btnFakeChat = QPushButton("채팅 한 줄")
-        btnFakeChat.clicked.connect(self.SendFakeChat)
-        objFakeRow.addWidget(btnFakeChat)
-        objFakeGrid.addLayout(objFakeRow, 2, 0, 1, 4)
-        btnClearTest = QPushButton("테스트 후원 · 미션 지우기")
-        btnClearTest.clicked.connect(self.OnClearTestClicked)
-        objFakeGrid.addWidget(btnClearTest, 3, 0, 1, 4)
-        objLayout.addWidget(objFakeBox)
-
-        # --- ② 실패 상황 흉내 ---
-        objFailBox = QGroupBox("② 실패 상황 흉내 (화면이 어떻게 알려주는지 확인)")
+        # --- ① 실패 상황 흉내 ---
+        objFailBox = QGroupBox("① 실패 상황 흉내 (화면이 어떻게 알려주는지 확인)")
         objFailGrid = QGridLayout(objFailBox)
         listFails = [
             ("후원 권한 없음 (403)", self.FakeDonationDenied),
@@ -115,8 +80,8 @@ class TestDialog(QDialog):
         objFailGrid.addWidget(btnRestore, 2, 0, 1, 2)
         objLayout.addWidget(objFailBox)
 
-        # --- ③ 실제 연결 점검 ---
-        objCheckBox = QGroupBox("③ 실제 연결 점검 (치지직에 진짜로 접속해서 확인)")
+        # --- ② 실제 연결 점검 ---
+        objCheckBox = QGroupBox("② 실제 연결 점검 (치지직에 진짜로 접속해서 확인)")
         objCheckLayout = QVBoxLayout(objCheckBox)
         self.btnCheck = QPushButton("연결 점검 시작")
         self.btnCheck.clicked.connect(self.StartCheck)
@@ -128,47 +93,7 @@ class TestDialog(QDialog):
         objLayout.addWidget(objCheckBox, 1)
 
     # ===================================================================
-    # ① 가짜 후원 · 채팅
-    # ===================================================================
-    def SendFakeDonation(self, strType: str) -> None:
-        objDonation = ChzzkDonationMessage(
-            strNickname=self.editNick.text().strip() or "테스트시청자",
-            nPayAmount=self.spinAmount.value(),
-            strText=self.editText.text(),
-            strDonationType=strType,
-            dtTime=datetime.now(),
-            dictRaw={"donationType": strType, "test": True},
-            bTest=True,
-        )
-        # 진짜 후원과 똑같은 길(공유기 신호)로 보내요 → 채팅창 · 후원 목록이 진짜처럼 반응해요.
-        self.objHub.sigDonation.emit(objDonation)
-        self.fnLog(f"{STR_TEST_TAG} 가짜 {strType} 후원 보냄: {objDonation.strNickname} {objDonation.nPayAmount:,}원")
-
-    def SendFakeChat(self) -> None:
-        objMessage = ChzzkChatMessage(
-            strNickname=self.editNick.text().strip() or "테스트시청자",
-            strContent=f"{STR_TEST_TAG} {self.editText.text()}",
-            strUserRole="common_user",
-            strSenderChannelId="test-viewer",
-            dtTime=datetime.now(),
-            # chatChannelId 를 비워 둬요 → 닉네임 메뉴의 제한 · 가리기가 꺼져서 진짜 요청이 나가지 않아요.
-            strChatChannelId="",
-        )
-        self.objHub.sigChat.emit(objMessage)
-
-    def OnClearTestClicked(self) -> None:
-        objParent = self.parent()
-        fnRemove = getattr(objParent, "RemoveTestRecords", None)
-        if fnRemove is None:
-            self.fnLog(f"{STR_TEST_TAG} 후원 목록 창에서 테스트 도구를 열어야 지울 수 있어요.")
-            return
-        nRemoved = fnRemove()
-        fnRemoveMissions = getattr(objParent, "fnRemoveTestMissions", None)
-        nMissions = fnRemoveMissions() if fnRemoveMissions else 0
-        self.fnLog(f"{STR_TEST_TAG} 테스트 후원 {nRemoved}건 · 테스트 미션 {nMissions}개를 지웠어요.")
-
-    # ===================================================================
-    # ② 실패 상황 흉내
+    # ① 실패 상황 흉내
     # ===================================================================
     def _FakeStatus(self, strState: str, strMessage: str) -> None:
         self.objHub.sigStatus.emit(strState, strMessage)
@@ -195,7 +120,7 @@ class TestDialog(QDialog):
             self.fnLog(f"{STR_TEST_TAG} 원래 상태로: 연결 안 됨")
 
     # ===================================================================
-    # ③ 실제 연결 점검
+    # ② 실제 연결 점검
     # ===================================================================
     def _CheckLog(self, strText: str) -> None:
         self.txtCheck.appendPlainText(strText)

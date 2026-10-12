@@ -165,6 +165,13 @@ def Main() -> None:
         objWin.objDonationWindow.tblDonations.clearSelection()
         objMissionView.tblMissions.clearSelection()
         Save(objWin, "main_window.png")
+        Save(objWin.objStreamWindow.grpDonation, "donation_list.png")   # 후원 목록 칸만
+        # 맨 위 막대 + 채팅 연결 상태 줄만 (시작하기 4단계: 로그인 확인용)
+        from PySide6.QtCore import QRect
+        nChatTop = objWin.objChatWindow.mapTo(objWin, objWin.objChatWindow.rect().topLeft()).y()
+        objWin.grab(QRect(0, 0, objWin.width() // 2 + 140, nChatTop + 34)).save(os.path.join(STR_IMG, "top_bar.png"))
+        print("saved top_bar.png")
+        Save(objWin.objStreamWindow.grpMission, "mission_panel.png")    # 미션 칸만
 
         # ---------------------------------------------------------------- 메뉴 (방송 · 보기 · 설정)
         for nIndex, strName in enumerate(["menu_broadcast.png", "menu_view.png", "menu_settings.png"]):

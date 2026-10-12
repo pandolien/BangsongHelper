@@ -126,7 +126,6 @@ class DonationWindow(QWidget):
         self.objTestDialog: Optional[TestDialog] = None
         # 메인 창이 넣어줘요: 고른 후원을 미션으로 만드는 함수 / 테스트 미션을 지우는 함수
         self.fnMakeMission: Optional[Callable] = None
-        self.fnRemoveTestMissions: Optional[Callable[[], int]] = None
 
         self._BuildUi()
         self._LoadRecords()  # 예전에 받아 둔 후원을 불러와요.
@@ -375,17 +374,6 @@ class DonationWindow(QWidget):
         self.tblDonations.setRowCount(0)
         self._UpdateSummary()
         self._SaveRecords()
-
-    def RemoveTestRecords(self) -> int:
-        """테스트 도구로 만든 가짜 후원만 목록에서 지워요. 돌려주는 값: 지운 개수"""
-        nRemoved = 0
-        for nRow in range(len(self.listRecords) - 1, -1, -1):  # 뒤에서부터 지워야 줄 번호가 안 꼬여요.
-            if self.listRecords[nRow].bTest:
-                del self.listRecords[nRow]
-                self.tblDonations.removeRow(nRow)
-                nRemoved += 1
-        self._UpdateSummary()
-        return nRemoved
 
     def OnMakeMissionClicked(self) -> None:
         listRows = sorted({objIndex.row() for objIndex in self.tblDonations.selectionModel().selectedRows()})

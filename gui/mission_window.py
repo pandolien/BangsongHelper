@@ -576,16 +576,6 @@ class MissionWindow(QWidget):
             self.tblMissions.removeRow(nRow)
         self._AfterChange()
 
-    def RemoveTestMissions(self) -> int:
-        nRemoved = 0
-        for nRow in range(len(self.listMissions) - 1, -1, -1):
-            if self.listMissions[nRow].bTest:
-                del self.listMissions[nRow]
-                self.tblMissions.removeRow(nRow)
-                nRemoved += 1
-        self._AfterChange()
-        return nRemoved
-
     def _AfterChange(self) -> None:
         self._Save()
         self._UpdateSummary()
