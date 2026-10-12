@@ -28,7 +28,8 @@ from typing import Callable, Optional
 import socketio  # noqa: F401  (순서 맞추기용)
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGroupBox,
+    QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
@@ -48,10 +49,17 @@ from gui.chat_window import ChatWindow
 from gui.donation_window import DonationWindow
 from gui.mission_window import MissionWindow
 from gui.stream_window import N_TAB_DONATION, N_TAB_MISSION, StreamToolsWindow
-from config_manager import STR_CONFIG_PATH, LoadConfig, SaveConfig, StoreTokenToConfig, TokenFromConfig
+from config_manager import (
+    STR_CONFIG_PATH, DescribeImport, FindOldConfigs, ImportConfig, IsBlankConfig, LoadConfig, ReplaceInPlace,
+    SaveConfig, StoreTokenToConfig, TokenFromConfig,
+)
 from steam import DICT_DEFAULT_STEAM_URLS, SteamApiClient, SteamApiError, SteamPlayerStatus
 from youtube import DICT_DEFAULT_YOUTUBE_URLS
 from gui.youtube_hub import YouTubeHub
+import app_log
+from app_paths import B_TEST_MODE, STR_APP_DIR, STR_CONFIG_NAME
+from gui.alarm import DonationAlarm
+from gui.alarm_dialog import AlarmSettingsDialog
 from gui.theme import BuildPalette, BuildStyleSheet, ThemeColors, ThemeDialog
 
 # URL 설정에 보여줄 '사람이 읽는 이름'. (init.json 의 칸 이름 → 화면 글자)
@@ -79,12 +87,16 @@ DICT_URL_LABELS = {
         "session_auth": "채팅 받기 접속 주소 발급 경로",
         "session_subscribe_chat": "채팅 이벤트 구독 경로",
         "session_subscribe_donation": "후원 이벤트 구독 경로",
+        "session_subscribe_subscription": "구독 이벤트 구독 경로",
         "chat_blind": "채팅 메시지 가리기 경로",
         "temporary_restrict": "임시 제한 경로",
         "restrict": "활동 제한 경로",
     },
 }
 DICT_DEFAULT_URLS = {"steam": DICT_DEFAULT_STEAM_URLS, "chzzk": DICT_DEFAULT_CHZZK_URLS, "youtube": DICT_DEFAULT_YOUTUBE_URLS}
+
+# 창 제목. (시험용 설정으로 켰으면 눈에 띄게 표시해요: run.bat --test)
+STR_APP_TITLE = "방송 도우미" + (f" [테스트: {STR_CONFIG_NAME}]" if B_TEST_MODE else "")
 
 # 공유기(ChatHub)에 '후원 받기 자동 시작' 이 연결을 쓰고 있다고 올려 두는 이름
 STR_AUTO_DONATION_USER = "auto_donation"
@@ -117,6 +129,7 @@ class Worker(QRunnable):
         except Exception as objError:  # 일꾼이 죽으면 프로그램 전체가 꺼질 수 있어서 모두 잡아요.
             if not isinstance(objError, (ChzzkApiError, SteamApiError)):
                 traceback.print_exc()
+                app_log.LogException("백그라운드 작업 중 오류")
             self._SafeEmit(self.objSignals.sigFailed, objError)
         else:
             self._SafeEmit(self.objSignals.sigFinished, objResult)
@@ -140,7 +153,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("방송 도우미")
+        self.setWindowTitle(STR_APP_TITLE)
         self.resize(1280, 820)
 
         self.objThreadPool = QThreadPool.globalInstance()
@@ -181,11 +194,31 @@ class MainWindow(QMainWindow):
         # 미션 창도 미리 만들어 둬요. (창이 닫혀 있어도 미션 후원을 받아서 등록해요)
         self.objMissionWindow = MissionWindow(self.objChatHub, fnLog=self.Log, dictApp=self.dictConfig["app"],
                                               fnSaveConfig=lambda: SaveConfig(self.dictConfig))
-        self.objDonationWindow.fnMakeMission = self.objMissionWindow.AddFromDonationRecord
+        # 후원 알림 소리: 치지직 후원 · 유튜브 슈퍼챗이 오면 '딩동'
+        # (후원 소리와 구독 소리는 소리도, 켜고 끄는 설정도 따로예요)
+        self.objAlarm = DonationAlarm()
+        for strKind, strPrefix in (("donation", "donation"), ("subscription", "subscription")):
+            self.objAlarm.SetStyle(strKind, self.dictConfig["app"].get(f"{strPrefix}_sound_volume"),
+                                   self.dictConfig["app"].get(f"{strPrefix}_sound_pitch"))
+        self.dlgAlarm: Optional[AlarmSettingsDialog] = None
+        try:
+            self.objAlarm.Prepare()
+        except Exception:  # 소리 때문에 프로그램이 안 켜지면 안 돼요.
+            pass
+        objDonW = self.objDonationWindow
+        objDonW.chkSound.setChecked(bool(self.dictConfig["app"].get("donation_sound", True)))
+        objDonW.chkSubSound.setChecked(bool(self.dictConfig["app"].get("subscription_sound", True)))
+        objDonW.chkSound.toggled.connect(lambda bChecked: self.OnAlarmToggled("donation_sound", "후원", bChecked))
+        objDonW.chkSubSound.toggled.connect(lambda bChecked: self.OnAlarmToggled("subscription_sound", "구독", bChecked))
+        objDonW.btnSoundTest.clicked.connect(lambda: self.objAlarm.Play("donation"))
+        objDonW.btnSubSoundTest.clicked.connect(lambda: self.objAlarm.Play("subscription"))
+        objDonW.btnSoundSettings.clicked.connect(self.OnAlarmSettingsClicked)
+        self.objChatHub.sigDonation.connect(self._OnDonationAlarm)
         # 채팅 + 후원 목록 + 미션을 한 화면에 합친 '방송 도우미' 창
         # 유튜브 채팅 (공식 Data API, API 키 필요). 슈퍼챗은 후원 목록 · 미션에도 들어가요.
         self.objYouTubeHub = YouTubeHub(fnGetConfig=lambda: self.dictConfig)
         self.objYouTubeHub.sigDonation.connect(self.objDonationWindow.AddDonation)
+        self.objYouTubeHub.sigDonation.connect(self._OnDonationAlarm)
         self.objYouTubeHub.sigDonation.connect(self.objMissionWindow._OnDonation)
         self.objChatWindow = ChatWindow(self.objChatHub, fnLog=self.Log, objYouTubeHub=self.objYouTubeHub,
                                         fnGetYouTubeTarget=lambda: self.dictConfig["youtube"].get("default_target", ""))
@@ -232,12 +265,15 @@ class MainWindow(QMainWindow):
 
         self.sigTokenChanged.connect(self._UpdateLoginLabel)
 
+        self.Log("=== 프로그램 시작 ===" + (f" (설정 파일: {STR_CONFIG_NAME})" if B_TEST_MODE else ""))
         self._RebuildClients()
         self._UpdateLoginLabel()
         for strWarning in self.objGameMap.listWarnings:
             self.Log(f"[경고] {strWarning}")
         if self._HasRequiredSettings():
             self.OnRefreshClicked()
+        # 창이 뜬 다음에 물어봐요. (설정이 비어 있을 때만)
+        QTimer.singleShot(0, self._CheckOldConfig)
 
     # ===================================================================
     # 화면 만들기
@@ -253,6 +289,10 @@ class MainWindow(QMainWindow):
 
         objRow = QHBoxLayout()
         objRow.setSpacing(8)
+        if B_TEST_MODE:  # 시험용 설정으로 켰다는 표시 (진짜 방송과 헷갈리지 않게)
+            lblChipTest = self._Chip(f"테스트 설정: {STR_CONFIG_NAME}")
+            self._SetChip(lblChipTest, lblChipTest.text(), "warn")
+            objRow.addWidget(lblChipTest)
         self.lblChipLive = self._Chip("방송 확인 전")
         self.lblChipViewers = self._Chip("시청자 -")
         self.lblChipLogin = self._Chip("로그인 확인 전")
@@ -311,7 +351,10 @@ class MainWindow(QMainWindow):
 
         objSettings = objMenuBar.addMenu("설정(&S)")
         objSettings.addAction("키 · ID · 서버 주소...", self.OnOpenSettingsClicked)
+        objSettings.addAction("알림 소리...", self.OnAlarmSettingsClicked)
         objSettings.addAction("색상...", self.OnThemeClicked)
+        objSettings.addSeparator()
+        objSettings.addAction("이전 설정 가져오기...", self.OnImportConfigClicked)
 
     def _MakeWindow(self, strTitle: str, objContent: QWidget, nWidth: int, nHeight: int) -> QDialog:
         """메뉴에서 여는 창 하나. (메인 창을 막지 않아서 열어 둔 채로 써도 돼요)"""
@@ -612,6 +655,92 @@ class MainWindow(QMainWindow):
         if getattr(self, "objChatWindow", None) is not None:
             self.objChatWindow.SetColors(dictColors["card"], dictColors["text"])
 
+    @staticmethod
+    def _DescribeFound(dictInfo: dict) -> str:
+        listFound = [strLabel for bFound, strLabel in (
+            (dictInfo["bChzzkKeys"], "치지직 Client ID / Secret"), (dictInfo["bChzzkLogin"], "치지직 로그인"),
+            (dictInfo["bSteam"], "스팀 API 키"), (dictInfo["bYouTube"], "유튜브 API 키")) if bFound]
+        return " · ".join(listFound) if listFound else "(키 · 로그인 정보는 비어 있어요)"
+
+    def _CheckOldConfig(self) -> None:
+        """켤 때마다 확인: 설정이 비어 있고 옆 폴더에 이전 버전 설정이 있으면 가져올지 물어봐요.
+
+        - 이미 키 · 로그인이 있으면 아무것도 안 해요. (쓰는 중인 설정은 건드리지 않아요)
+        - 시험용 설정(run.bat --test)으로 켰을 때는 묻지 않아요.
+        """
+        if B_TEST_MODE or not self.dictConfig["app"].get("ask_import_old_config", True):
+            return
+        if not IsBlankConfig(self.dictConfig):
+            return
+        listOld = FindOldConfigs()
+        if not listOld:
+            return
+        try:
+            dictInfo = DescribeImport(listOld[0])
+        except RuntimeError:
+            return
+        strAnswer = self._AskImportOld(listOld[0], self._DescribeFound(dictInfo), len(dictInfo["listAdded"]))
+        if strAnswer == "import":
+            self._ImportFromPath(listOld[0], bConfirm=False)
+        elif strAnswer == "never":
+            self.dictConfig["app"]["ask_import_old_config"] = False
+            try:
+                SaveConfig(self.dictConfig)
+            except OSError as objError:
+                self.Log(f"[경고] 설정 저장 실패: {objError}")
+            self.Log("[설정] 이전 설정을 다시 묻지 않아요. ([설정] → 이전 설정 가져오기 로 언제든 가져올 수 있어요)")
+
+    def _AskImportOld(self, strPath: str, strFound: str, nAdded: int) -> str:
+        """이전 버전 설정을 찾았다고 알리고 물어봐요. 돌려주는 값: "import" / "skip" / "never" """
+        objBox = QMessageBox(self)
+        objBox.setWindowTitle("이전 설정을 찾았어요")
+        objBox.setIcon(QMessageBox.Icon.Question)
+        objBox.setText(f"이전 버전의 설정 파일을 찾았어요.\n\n{strPath}\n\n이어받는 것: {strFound} + 프로그램 설정\n"
+                       f"새로 생긴 칸 {nAdded}개는 기본값으로 채워요.\n\n지금 설정이 비어 있어서 가져올 수 있어요. 가져올까요?\n"
+                       "(가져온 뒤에는 프로그램이 종료돼요. 다시 켜면 적용돼요)")
+        btnImport = objBox.addButton("가져오기", QMessageBox.ButtonRole.AcceptRole)
+        objBox.addButton("이번엔 건너뛰기", QMessageBox.ButtonRole.RejectRole)
+        btnNever = objBox.addButton("다시 묻지 않기", QMessageBox.ButtonRole.DestructiveRole)
+        objBox.exec()
+        objClicked = objBox.clickedButton()
+        return "import" if objClicked is btnImport else "never" if objClicked is btnNever else "skip"
+
+    def OnImportConfigClicked(self) -> None:
+        """새 버전으로 옮겼을 때: 이전 폴더의 init.json 을 골라서 키 · 로그인 · 설정을 이어받아요."""
+        strPath, _ = QFileDialog.getOpenFileName(
+            self, "이전 버전의 설정 파일 고르기 (이전 폴더의 data → init.json)", os.path.dirname(STR_APP_DIR),
+            "설정 파일 (*.json);;모든 파일 (*)")
+        if not strPath:
+            return
+        self._ImportFromPath(strPath, bConfirm=True)
+
+    def _ImportFromPath(self, strPath: str, bConfirm: bool) -> None:
+        """고른 설정 파일을 가져와요. (bConfirm 이면 가져오기 전에 한 번 더 확인해요)"""
+        try:
+            dictInfo = DescribeImport(strPath)
+        except RuntimeError as objError:
+            QMessageBox.warning(self, "가져올 수 없어요", str(objError))
+            return
+        strFound = self._DescribeFound(dictInfo)
+        if bConfirm:
+            strQuestion = (f"이 파일의 설정을 지금 설정으로 가져올까요?\n\n{strPath}\n\n"
+                           f"이어받는 것: {strFound} + 프로그램 설정\n"
+                           f"새로 생긴 칸 {len(dictInfo['listAdded'])}개는 기본값으로 채워요.\n\n"
+                           "지금 설정은 .bak 파일로 백업해 두고, 가져온 뒤에는 프로그램이 종료돼요. (다시 켜면 적용돼요)")
+            if QMessageBox.question(self, "이전 설정 가져오기", strQuestion) != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            ImportConfig(strPath, STR_CONFIG_PATH)
+        except (RuntimeError, OSError) as objError:
+            QMessageBox.warning(self, "가져올 수 없어요", str(objError))
+            return
+        # 메모리의 설정도 같은 내용으로 맞춰요. (안 그러면 종료 전에 뭔가 저장될 때 옛 값으로 덮어써요)
+        ReplaceInPlace(self.dictConfig, dictInfo["merged"])
+        self.Log(f"[설정] 이전 설정을 가져왔어요: {strFound} (새 칸 {len(dictInfo['listAdded'])}개)")
+        QMessageBox.information(self, "가져왔어요",
+                                "이전 설정을 가져왔어요.\n프로그램을 종료할게요. run.bat 을 다시 실행해 주세요.")
+        QTimer.singleShot(0, self.close)
+
     def OnThemeClicked(self) -> None:
         """[색상] 창. 고르는 동안 바로 보여주고, 취소하면 원래 색으로 돌아가요."""
         dlgTheme = ThemeDialog(self.dictConfig.get("theme"), fnPreview=self._ApplyTheme, parent=self)
@@ -725,6 +854,7 @@ class MainWindow(QMainWindow):
 
     def Log(self, strMessage: str) -> None:
         strLine = time.strftime("[%H:%M:%S] ") + strMessage
+        app_log.Write(strMessage)  # Log 폴더에 날짜별 파일로 남겨요. (7일치)
         self.txtLog.appendPlainText(strLine)
         if hasattr(self, "lblStatusLog"):  # 상태줄은 창을 다 만든 뒤에 생겨요.
             self.lblStatusLog.setText(strLine)
@@ -863,6 +993,45 @@ class MainWindow(QMainWindow):
         elif not bWant and self.bAutoDonationJoined:
             self.bAutoDonationJoined = False
             self.objChatHub.Leave(STR_AUTO_DONATION_USER)  # 채팅창 · 후원 목록 창이 열려 있으면 연결은 유지돼요.
+
+    def _OnDonationAlarm(self, objDonation) -> None:
+        """후원 · 구독이 오면 알림 소리를 내요. 구독은 후원과 다른 소리고, 각각 꺼 둘 수 있어요."""
+        if objDonation.strDonationType == "SUBSCRIPTION":
+            if self.objDonationWindow.chkSubSound.isChecked():
+                self.objAlarm.Play("subscription")
+        elif self.objDonationWindow.chkSound.isChecked():
+            self.objAlarm.Play("donation")
+
+    def OnAlarmSettingsClicked(self) -> None:
+        """[설정] → 알림 소리...: 후원 · 구독 소리의 크기 · 음 높이"""
+        if self.dlgAlarm is None:
+            self.dlgAlarm = AlarmSettingsDialog(self.objAlarm.GetStyle, self._ApplyAlarmStyle, self._PreviewAlarm, self)
+        self.dlgAlarm.Reload()
+        self._OpenWindow(self.dlgAlarm)
+
+    def _ApplyAlarmStyle(self, strKind: str, nVolume: int, strPitch: str, bSave: bool) -> None:
+        self.objAlarm.SetStyle(strKind, nVolume, strPitch)
+        self.dictConfig["app"][f"{strKind}_sound_volume"] = nVolume
+        self.dictConfig["app"][f"{strKind}_sound_pitch"] = strPitch
+        if bSave:
+            try:
+                SaveConfig(self.dictConfig)
+            except OSError as objError:
+                self.Log(f"[경고] 설정 저장 실패: {objError}")
+
+    def _PreviewAlarm(self, strKind: str) -> None:
+        """설정을 바꾼 직후 들려줘요. (바로 이어서 바꿀 수 있게 간격 제한은 풀어요)"""
+        self.objAlarm.dictLastPlayedAt.pop(strKind, None)
+        self.objAlarm.Play(strKind)
+
+    def OnAlarmToggled(self, strKey: str, strName: str, bChecked: bool) -> None:
+        """후원 소리 / 구독 소리 켜고 끄기를 저장해요."""
+        self.dictConfig["app"][strKey] = bChecked
+        try:
+            SaveConfig(self.dictConfig)
+        except OSError as objError:
+            self.Log(f"[경고] 설정 저장 실패: {objError}")
+        self.Log(f"[{strName}] 알림 소리 {'켜짐' if bChecked else '꺼짐'}")
 
     def OnAutoDonationToggled(self, bChecked: bool) -> None:
         self.dictConfig["app"]["auto_donation"] = bChecked
@@ -1715,7 +1884,7 @@ class MainWindow(QMainWindow):
     def _UpdateStreamButton(self, nPending: int, nMissions: int) -> None:
         """창 제목에 후원 대기 · 미션 수를 보여줘요. (작업 표시줄에서도 보여요)"""
         listParts = ([f"대기 {nPending}"] if nPending else []) + ([f"미션 {nMissions}"] if nMissions else [])
-        self.setWindowTitle("방송 도우미" + (f" ({' · '.join(listParts)})" if listParts else ""))
+        self.setWindowTitle(STR_APP_TITLE + (f" ({' · '.join(listParts)})" if listParts else ""))
 
     def closeEvent(self, objEvent) -> None:  # noqa: N802 (Qt 가 정한 이름)
         """메인 창을 닫으면 방송 도우미 창도 닫고 연결도 끊어요."""
@@ -1723,11 +1892,13 @@ class MainWindow(QMainWindow):
         self.objYouTubeHub.Disconnect()
         self.objStreamWindow.close()
         self.objChatHub.Disconnect()
+        app_log.Write("=== 프로그램 종료 ===")
         super().closeEvent(objEvent)
 
 
 def RunGui() -> int:
     """창을 띄우고, 사용자가 창을 닫을 때까지 기다려요."""
+    app_log.InstallExceptionHook()  # 처리되지 않은 오류도 로그 파일에 남겨요.
     objApp = QApplication(sys.argv)
     objWindow = MainWindow()
     objWindow.show()

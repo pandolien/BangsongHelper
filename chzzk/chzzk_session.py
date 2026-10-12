@@ -88,12 +88,32 @@ class ChzzkDonationMessage:
     dtTime: datetime
     dictEmojis: Dict[str, str] = field(default_factory=dict)
     dictRaw: Dict = field(default_factory=dict)  # 받은 원본 (문서에 없는 새 종류가 오면 모양을 확인하려고)
-    bTest: bool = False          # 테스트 도구로 만든 가짜 후원이면 True (저장하지 않아요)
 
     @property
     def bIsKnownType(self) -> bool:
-        """공식 문서에 있는 종류(CHAT / VIDEO)인지."""
-        return self.strDonationType in ("CHAT", "VIDEO")
+        """프로그램이 아는 종류인지. (공식 후원 CHAT / VIDEO + 이 프로그램이 만든 YOUTUBE · SUBSCRIPTION)"""
+        return self.strDonationType in ("CHAT", "VIDEO", "YOUTUBE", "SUBSCRIPTION")
+
+
+@dataclass
+class ChzzkSubscriptionMessage:
+    """구독 한 건. (공식 문서의 SUBSCRIPTION 이벤트)"""
+
+    strNickname: str
+    nTierNo: int                 # 1: 티어1, 2: 티어2
+    strTierName: str             # 구독 브랜드 이름
+    nMonth: int                  # 구독 기간(개월)
+    dtTime: datetime
+    dictRaw: Dict = field(default_factory=dict)
+
+    def ToDonation(self) -> "ChzzkDonationMessage":
+        """후원 목록 · 채팅창 · 로그가 같이 다룰 수 있게 '후원 모양' 으로 바꿔요. (금액은 0, 종류는 SUBSCRIPTION)"""
+        listParts = [f"티어{self.nTierNo}" if self.nTierNo else "", self.strTierName,
+                     f"{self.nMonth}개월" if self.nMonth else ""]
+        return ChzzkDonationMessage(
+            strNickname=self.strNickname, nPayAmount=0, strText=" · ".join(strPart for strPart in listParts if strPart),
+            strDonationType="SUBSCRIPTION", dtTime=self.dtTime, dictRaw=dict(self.dictRaw),
+        )
 
 
 def _ToDict(objData) -> dict:
@@ -148,6 +168,25 @@ def ParseDonationMessage(objData) -> ChzzkDonationMessage:
     )
 
 
+def ParseSubscriptionMessage(objData) -> ChzzkSubscriptionMessage:
+    dictData = _ToDict(objData)
+
+    def _Int(objValue) -> int:
+        try:
+            return int(objValue)
+        except (TypeError, ValueError):
+            return 0
+
+    return ChzzkSubscriptionMessage(
+        strNickname=dictData.get("subscriberNickname") or "익명",
+        nTierNo=_Int(dictData.get("tierNo")),
+        strTierName=str(dictData.get("tierName") or ""),
+        nMonth=_Int(dictData.get("month")),
+        dtTime=datetime.now(),
+        dictRaw=dict(dictData),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 실시간 채팅 연결 관리자
 # ---------------------------------------------------------------------------
@@ -177,6 +216,8 @@ class ChzzkChatSession:
         fnOnStatus: Optional[Callable[[str, str], None]] = None,
         bSubscribeDonation: bool = True,
         fnOnDonationState: Optional[Callable[[bool, str], None]] = None,
+        fnOnSubscription: Optional[Callable[[ChzzkSubscriptionMessage], None]] = None,
+        fnOnSubscriptionState: Optional[Callable[[bool, str], None]] = None,
     ):
         self.objClient = objClient
         self.fnOnChat = fnOnChat
@@ -184,6 +225,8 @@ class ChzzkChatSession:
         self.fnOnStatus = fnOnStatus
         self.bSubscribeDonation = bSubscribeDonation
         self.fnOnDonationState = fnOnDonationState
+        self.fnOnSubscription = fnOnSubscription            # 구독이 왔을 때
+        self.fnOnSubscriptionState = fnOnSubscriptionState  # 구독 알림 신청 결과 (False 면 보통 '구독 조회' 권한 문제)
 
         self.objStopEvent = threading.Event()   # "이제 그만!" 깃발
         self.objThread: Optional[threading.Thread] = None
@@ -267,7 +310,10 @@ class ChzzkChatSession:
                 strEvent = dictInner.get("eventType", "")
                 if strEvent == "DONATION":
                     self._NotifyDonationState(True, "")
-                self._NotifyStatus("connected", f"{'채팅' if strEvent == 'CHAT' else '후원'} 받기 시작!")
+                elif strEvent == "SUBSCRIPTION":
+                    self._NotifySubscriptionState(True, "")
+                strWhat = {"CHAT": "채팅", "DONATION": "후원", "SUBSCRIPTION": "구독"}.get(strEvent, "후원")
+                self._NotifyStatus("connected", f"{strWhat} 받기 시작!")
             elif strType == "revoked":
                 self._NotifyStatus("error", "권한이 취소됐어요. 개발자 센터 권한을 확인하고 다시 로그인해 주세요.")
 
@@ -280,6 +326,11 @@ class ChzzkChatSession:
         def _OnDonation(objData):
             if self.fnOnDonation:
                 self.fnOnDonation(ParseDonationMessage(objData))
+
+        @objSocket.on("SUBSCRIPTION")
+        def _OnSubscription(objData):
+            if self.fnOnSubscription:
+                self.fnOnSubscription(ParseSubscriptionMessage(objData))
 
         objSocket.connect(strUrl, transports=["websocket"])
         if self.objStopEvent.is_set():
@@ -311,6 +362,22 @@ class ChzzkChatSession:
                     strReason = f"후원 알림 구독 실패: {objError}"
                     self._NotifyStatus("connected", strReason)
                 self._NotifyDonationState(False, strReason)
+        # 구독 알림은 덤이에요. 권한이 없어도 채팅 · 후원은 그대로 받아요.
+        try:
+            self.objClient.SubscribeSubscriptionEvent(self.strSessionKey)
+        except ChzzkApiError as objError:
+            if objError.nHttpStatus == 403:
+                strReason = "개발자 센터에서 '구독 조회' 권한을 켜고, 프로그램에서 로그아웃 → 다시 로그인해 주세요."
+            else:
+                strReason = f"구독 알림 구독 실패: {objError}"
+            self._NotifySubscriptionState(False, strReason)
+
+    def _NotifySubscriptionState(self, bOk: bool, strReason: str) -> None:
+        if self.fnOnSubscriptionState:
+            try:
+                self.fnOnSubscriptionState(bOk, strReason)
+            except Exception:
+                pass
 
     def _NotifyDonationState(self, bOk: bool, strReason: str) -> None:
         if self.fnOnDonationState:

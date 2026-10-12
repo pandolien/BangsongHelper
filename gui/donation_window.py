@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from app_paths import DataPath
+from app_paths import RecordPath
 from chzzk import ChzzkDonationMessage, RE_EMOJI_PLACEHOLDER
 from gui.chat_hub import ChatHub
 from gui.test_dialog import TestDialog
@@ -47,7 +47,7 @@ from gui.test_dialog import TestDialog
 STR_STUDIO_URL = "https://studio.chzzk.naver.com/"
 
 # 받은 후원을 저장하는 파일 (닉네임 같은 개인정보가 들어 있어서 깃허브에 올리지 않아요)
-STR_DONATION_FILE = DataPath("donations.json")
+STR_DONATION_FILE = RecordPath("donations.json")
 N_MAX_SAVED_DONATIONS = 3000  # 이보다 많아지면 오래된 것부터 지워요.
 
 # 상태 → (화면 글자, 글자 색)
@@ -58,12 +58,12 @@ DICT_STATE_VIEW = {
 }
 
 # 후원 종류 → 화면 이름. (공식 문서엔 CHAT / VIDEO 뿐이에요. MISSION 은 혹시 오면 보여주려고 넣어 뒀어요)
-DICT_TYPE_NAMES = {"VIDEO": "영상", "CHAT": "채팅", "MISSION": "미션", "YOUTUBE": "유튜브"}
-DICT_TYPE_COLORS = {"VIDEO": "#c2255c", "MISSION": "#7048e8", "YOUTUBE": "#e03131"}
+DICT_TYPE_NAMES = {"VIDEO": "영상", "CHAT": "채팅", "MISSION": "미션", "YOUTUBE": "유튜브", "SUBSCRIPTION": "구독"}
+DICT_TYPE_COLORS = {"VIDEO": "#c2255c", "MISSION": "#7048e8", "YOUTUBE": "#e03131", "SUBSCRIPTION": "#0c8599"}
 
 # 보기 고르기 (콤보 상자 순서대로)
 LIST_TYPE_FILTERS = [("전체", None), ("영상 후원만", "VIDEO"), ("미션 후원만", "MISSION"), ("채팅 후원만", "CHAT"),
-                     ("유튜브 슈퍼챗만", "YOUTUBE")]
+                     ("유튜브 슈퍼챗만", "YOUTUBE"), ("구독만", "SUBSCRIPTION")]
 
 # 표 칸 번호
 N_COL_TIME, N_COL_TYPE, N_COL_NICK, N_COL_AMOUNT, N_COL_TEXT, N_COL_STATE = range(6)
@@ -79,12 +79,10 @@ class DonationRecord:
     nPayAmount: int
     strText: str        # 영상 후원이면 영상 제목, 채팅 후원이면 메시지
     strState: str = "wait"
-    bTest: bool = False  # 테스트 도구로 만든 가짜 후원 (파일에 저장하지 않아요)
 
     @property
     def strTypeName(self) -> str:
-        strName = DICT_TYPE_NAMES.get(self.strType, self.strType)
-        return f"{strName} (테스트)" if self.bTest else strName
+        return DICT_TYPE_NAMES.get(self.strType, self.strType)
 
     @property
     def bIsToday(self) -> bool:
@@ -124,8 +122,6 @@ class DonationWindow(QWidget):
         self.listRecords: List[DonationRecord] = []
         self.strSavePath = strSavePath
         self.objTestDialog: Optional[TestDialog] = None
-        # 메인 창이 넣어줘요: 고른 후원을 미션으로 만드는 함수 / 테스트 미션을 지우는 함수
-        self.fnMakeMission: Optional[Callable] = None
 
         self._BuildUi()
         self._LoadRecords()  # 예전에 받아 둔 후원을 불러와요.
@@ -181,6 +177,27 @@ class DonationWindow(QWidget):
         objFilterRow.addWidget(self.chkWaitOnly)
         objFilterRow.addWidget(self.chkTodayOnly)
         objFilterRow.addStretch()
+        # 알림 소리: 후원 · 구독을 따로 켜고 끄고, 따로 들어 봐요. (실제로 소리를 내는 건 메인 창이에요)
+        self.chkSound = QCheckBox("후원 소리")
+        self.chkSound.setChecked(True)
+        self.chkSound.setToolTip("후원이 들어오면 부드러운 '도-미' 소리를 내요. (유튜브 슈퍼챗도 같아요)")
+        self.btnSoundTest = QPushButton("▶")
+        self.btnSoundTest.setToolTip("후원 소리를 미리 들어 봐요.")
+        self.chkSubSound = QCheckBox("구독 소리")
+        self.chkSubSound.setChecked(True)
+        self.chkSubSound.setToolTip("구독이 들어오면 '솔-도-미' 소리를 내요. (후원 소리와 달라요)")
+        self.btnSubSoundTest = QPushButton("▶")
+        self.btnSubSoundTest.setToolTip("구독 소리를 미리 들어 봐요.")
+        self.btnSoundSettings = QPushButton("⚙")
+        self.btnSoundSettings.setToolTip("알림 소리 크기 · 음 높이 설정")
+        for btnSmall in (self.btnSoundTest, self.btnSubSoundTest, self.btnSoundSettings):
+            btnSmall.setFixedWidth(34)
+        objFilterRow.addWidget(self.chkSound)
+        objFilterRow.addWidget(self.btnSoundTest)
+        objFilterRow.addSpacing(8)
+        objFilterRow.addWidget(self.chkSubSound)
+        objFilterRow.addWidget(self.btnSubSoundTest)
+        objFilterRow.addWidget(self.btnSoundSettings)
         objLayout.addLayout(objFilterRow)
 
         # --- 표 ---
@@ -205,18 +222,15 @@ class DonationWindow(QWidget):
         btnSkip.clicked.connect(lambda: self._SetSelectedState("skip"))
         btnWait = QPushButton("대기로 되돌리기")
         btnWait.clicked.connect(lambda: self._SetSelectedState("wait"))
-        btnMission = QPushButton("미션으로 만들기")
-        btnMission.setToolTip("고른 후원을 미션 창에 등록해요. (타이머로 관리)")
-        btnMission.clicked.connect(self.OnMakeMissionClicked)
         btnStudio = QPushButton("치지직 스튜디오 열기")
         btnStudio.setToolTip("영상 재생 · 건너뛰기는 치지직 스튜디오에서 해요. (공식 API 에 제어 기능이 없어요)")
         btnStudio.clicked.connect(lambda: webbrowser.open(STR_STUDIO_URL))
         btnClear = QPushButton("목록 지우기")
         btnClear.clicked.connect(self.OnClearClicked)
         btnTest = QPushButton("테스트 도구")
-        btnTest.setToolTip("가짜 후원 보내기 · 실패 상황 흉내 · 실제 연결 점검")
+        btnTest.setToolTip("실패 상황 흉내 · 실제 연결 점검")
         btnTest.clicked.connect(self.OnTestToolClicked)
-        for btnItem in (btnDone, btnSkip, btnWait, btnMission):
+        for btnItem in (btnDone, btnSkip, btnWait):
             objButtonRow.addWidget(btnItem)
         objButtonRow.addStretch()
         objButtonRow.addWidget(btnTest)
@@ -288,7 +302,7 @@ class DonationWindow(QWidget):
     # ===================================================================
     def AddDonation(self, objDonation: ChzzkDonationMessage) -> None:
         strText = RE_EMOJI_PLACEHOLDER.sub(lambda objMatch: f"[{objMatch.group(1)}]", objDonation.strText or "")
-        if not objDonation.bIsKnownType and not objDonation.bTest:
+        if not objDonation.bIsKnownType:
             # 공식 문서에 없는 종류(미션 등)가 왔어요 → 모양을 확인할 수 있게 원본을 로그에 남겨요.
             self.fnLog(f"[후원] 처음 보는 후원 종류 '{objDonation.strDonationType}' 를 받았어요. 원본: {objDonation.dictRaw}")
         objRecord = DonationRecord(
@@ -297,7 +311,8 @@ class DonationWindow(QWidget):
             strNickname=objDonation.strNickname,
             nPayAmount=objDonation.nPayAmount,
             strText=strText,
-            bTest=objDonation.bTest,
+            # 구독은 '봐야 할 영상' 이 아니라서 처음부터 '봄' 으로 둬요. (대기 숫자에 안 들어가게)
+            strState="done" if objDonation.strDonationType == "SUBSCRIPTION" else "wait",
         )
         nRow = self._AddRecordRow(objRecord)
         self._UpdateSummary()
@@ -314,7 +329,7 @@ class DonationWindow(QWidget):
         # 오늘 후원은 시각만, 예전 후원은 날짜도 같이 보여줘요.
         strTime = objRecord.dtTime.strftime("%H:%M:%S" if objRecord.bIsToday else "%m-%d %H:%M")
         listCells = [strTime, objRecord.strTypeName, objRecord.strNickname,
-                     f"{objRecord.nPayAmount:,}원", objRecord.strText, ""]
+                     "-" if objRecord.strType == "SUBSCRIPTION" else f"{objRecord.nPayAmount:,}원", objRecord.strText, ""]
         for nCol, strCell in enumerate(listCells):
             objItem = QTableWidgetItem(strCell)
             if nCol == N_COL_AMOUNT:
@@ -322,9 +337,7 @@ class DonationWindow(QWidget):
             if nCol == N_COL_TEXT:
                 objItem.setToolTip(strCell)
             self.tblDonations.setItem(nRow, nCol, objItem)
-        if objRecord.bTest:  # 테스트 후원은 회색으로
-            self.tblDonations.item(nRow, N_COL_TYPE).setForeground(QBrush(QColor("#868e96")))
-        elif objRecord.strType in DICT_TYPE_COLORS:  # 영상 · 미션 후원은 눈에 띄게
+        if objRecord.strType in DICT_TYPE_COLORS:  # 영상 · 미션 · 구독은 눈에 띄게
             self.tblDonations.item(nRow, N_COL_TYPE).setForeground(QBrush(QColor(DICT_TYPE_COLORS[objRecord.strType])))
         self._PaintState(nRow)
         self._ApplyFilterToRow(nRow)
@@ -375,17 +388,6 @@ class DonationWindow(QWidget):
         self._UpdateSummary()
         self._SaveRecords()
 
-    def OnMakeMissionClicked(self) -> None:
-        listRows = sorted({objIndex.row() for objIndex in self.tblDonations.selectionModel().selectedRows()})
-        if not listRows:
-            QMessageBox.information(self, "안내", "미션으로 만들 후원을 목록에서 골라 주세요.")
-            return
-        if self.fnMakeMission is None:
-            return
-        for nRow in listRows:
-            self.fnMakeMission(self.listRecords[nRow])
-        self.fnLog(f"[미션] 후원 {len(listRows)}건을 미션으로 만들었어요. [미션] 창에서 [시작] 을 누르세요.")
-
     def OnTestToolClicked(self) -> None:
         if self.objTestDialog is None:
             self.objTestDialog = TestDialog(self.objHub, fnLog=self.fnLog, objParent=self)
@@ -419,7 +421,7 @@ class DonationWindow(QWidget):
     def _SaveRecords(self) -> None:
         """목록을 파일에 저장해요. (저장 도중 꺼져도 파일이 깨지지 않게 임시 파일을 거쳐요)"""
         # 테스트 후원은 저장하지 않아요.
-        listItems = [objRecord.ToDict() for objRecord in self.listRecords if not objRecord.bTest][-N_MAX_SAVED_DONATIONS:]
+        listItems = [objRecord.ToDict() for objRecord in self.listRecords][-N_MAX_SAVED_DONATIONS:]
         try:
             os.makedirs(os.path.dirname(self.strSavePath), exist_ok=True)
             strTempPath = self.strSavePath + ".tmp"
@@ -451,7 +453,9 @@ class DonationWindow(QWidget):
         listVideo = [objRecord for objRecord in listShown if objRecord.strType == "VIDEO"]
         listChat = [objRecord for objRecord in listShown if objRecord.strType == "CHAT"]
         listYouTube = [objRecord for objRecord in listShown if objRecord.strType == "YOUTUBE"]
-        listOther = [objRecord for objRecord in listShown if objRecord.strType not in ("VIDEO", "CHAT", "YOUTUBE")]  # 미션 등
+        listSub = [objRecord for objRecord in listShown if objRecord.strType == "SUBSCRIPTION"]
+        listOther = [objRecord for objRecord in listShown
+                     if objRecord.strType not in ("VIDEO", "CHAT", "YOUTUBE", "SUBSCRIPTION")]  # 미션 등
         nVideoWait = sum(1 for objRecord in listVideo if objRecord.strState == "wait")
         nWait = sum(1 for objRecord in listShown if objRecord.strState == "wait")
         listParts = [f"영상 후원 {len(listVideo)}건 · {sum(objRecord.nPayAmount for objRecord in listVideo):,}원 "
@@ -462,6 +466,8 @@ class DonationWindow(QWidget):
         listParts.append(f"채팅 후원 {len(listChat)}건 · {sum(objRecord.nPayAmount for objRecord in listChat):,}원")
         if listYouTube:  # 유튜브 슈퍼챗 (원화가 아닌 건 금액에 안 들어가요)
             listParts.append(f"유튜브 {len(listYouTube)}건 · {sum(objRecord.nPayAmount for objRecord in listYouTube):,}원")
+        if listSub:
+            listParts.append(f"구독 {len(listSub)}건")
         listParts.append(f"전체 대기 {nWait}건")
         self.lblSummary.setText(("[오늘] " if bTodayOnly else "") + "   |   ".join(listParts))
         # 메인 창 버튼 숫자는 보기와 상관없이 '전체 대기' 로 알려요.

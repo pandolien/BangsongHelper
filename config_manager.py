@@ -11,20 +11,24 @@ init.json 안에 들어가는 것
     chzzk : 치지직 Client ID/Secret, 채널 ID, 로그인 리디렉션 주소, 토큰
     urls  : 스팀/치지직 서버 주소들 (서버 주소가 바뀌면 여기만 고치면 돼요)
     app   : 자동 새로고침 간격 등 프로그램 설정
+
+새 버전으로 옮길 때는 이전 폴더의 data/init.json 을 가져올 수 있어요. → ImportConfig
+(키 · 로그인 · 설정은 그대로 이어받고, 새 버전에서 새로 생긴 칸은 기본값으로 채워요)
 """
 
 import json
 import os
+import shutil
 import threading
 from typing import Optional
 
-from app_paths import STR_APP_DIR, DataPath
+from app_paths import STR_APP_DIR, STR_CONFIG_NAME, DataPath
 from chzzk import DICT_DEFAULT_CHZZK_URLS, STR_DEFAULT_REDIRECT_URI, ChzzkTokenInfo
 from steam import DICT_DEFAULT_STEAM_URLS
 from youtube import DICT_DEFAULT_YOUTUBE_URLS
 
 STR_BASE_DIR = STR_APP_DIR  # exe 로 실행하면 exe 가 있는 폴더 (app_paths.py 참고)
-STR_CONFIG_PATH = DataPath("init.json")
+STR_CONFIG_PATH = DataPath(STR_CONFIG_NAME)  # 기본 data/init.json (run.bat --test 면 data/init_test.json)
 # 깃허브 등에 올려도 되는 '개인정보 뺀' 설정 파일 (키 · ID · 토큰은 빈칸)
 STR_UPLOAD_CONFIG_PATH = DataPath("init_upload.json")
 
@@ -62,7 +66,13 @@ DICT_DEFAULT_CONFIG = {
     # auto_fallback_various: 자동 맞추기 때 짝을 못 찾으면 '종합 게임' 으로
     # auto_detect_folder_games: 게임 설치 폴더(에픽 · 넥슨 등)에서 실행된 프로그램도 게임으로 알아보기
     "app": {"refresh_interval_sec": 30, "auto_sync_category": False, "auto_donation": True, "auto_fallback_various": True,
-            "auto_detect_folder_games": True},
+            "auto_detect_folder_games": True,
+            "donation_sound": True,  # donation_sound: 후원이 오면 알림 소리 / subscription_sound: 구독이 오면 알림 소리
+            "subscription_sound": True,
+            # 알림 소리 크기(0~100%) · 음 높이(low / mid / high). 후원 · 구독을 따로 맞춰요. ([설정] → 알림 소리...)
+            "donation_sound_volume": 70, "donation_sound_pitch": "mid",
+            "subscription_sound_volume": 70, "subscription_sound_pitch": "mid",
+            "ask_import_old_config": True},  # 설정이 비어 있을 때, 이전 버전 설정을 가져올지 켤 때 물어봐요
     # 화면 색: 색 묶음 이름 + 그 묶음에서 바꾼 색만 (gui/theme.py)
     "theme": {"preset": "라이트", "colors": {}},
 }
@@ -126,6 +136,135 @@ def SaveConfig(dictConfig: dict, strPath: str = STR_CONFIG_PATH) -> None:
         with open(strTempPath, "w", encoding="utf-8") as objFile:
             json.dump(dictConfig, objFile, ensure_ascii=False, indent=2)
         os.replace(strTempPath, strPath)
+
+
+def IsBlankConfig(dictConfig: dict) -> bool:
+    """키 · 로그인 정보가 하나도 없는 '새로 설치한' 설정인지."""
+    dictChzzk = dictConfig.get("chzzk") or {}
+    dictSteam = dictConfig.get("steam") or {}
+    dictYouTube = dictConfig.get("youtube") or {}
+    return not any((dictChzzk.get("client_id"), dictChzzk.get("client_secret"), dictChzzk.get("refresh_token"),
+                    dictSteam.get("api_key"), dictYouTube.get("api_key")))
+
+
+def FindOldConfigs(strAppDir: str = STR_APP_DIR, nMax: int = 5) -> list:
+    """같은 폴더 안의 다른 폴더들(이전 버전을 풀어 둔 곳)에서, 키가 들어 있는 data/init.json 을 찾아요.
+
+    돌려주는 값: 파일 경로 목록 (최근에 쓴 것부터). 현재 폴더와 시험용 설정은 빼요.
+    """
+    strParent = os.path.dirname(os.path.abspath(strAppDir))
+    strSelf = os.path.normcase(os.path.abspath(strAppDir))
+    listFound = []
+    try:
+        listNames = os.listdir(strParent)
+    except OSError:
+        return []
+    for strName in listNames:
+        strDir = os.path.join(strParent, strName)
+        if os.path.normcase(os.path.abspath(strDir)) == strSelf:
+            continue
+        strCandidate = os.path.join(strDir, "data", "init.json")
+        if not os.path.isfile(strCandidate):
+            continue
+        try:
+            with open(strCandidate, "r", encoding="utf-8") as objFile:
+                dictOld = json.load(objFile)
+            if isinstance(dictOld, dict) and not IsBlankConfig(dictOld):
+                listFound.append((os.path.getmtime(strCandidate), strCandidate))
+        except (OSError, ValueError):
+            continue
+    listFound.sort(reverse=True)
+    return [strPath for _, strPath in listFound[:nMax]]
+
+
+# 설정 파일이 맞는지 알아볼 때 보는 맨 위 칸들
+TUPLE_CONFIG_SECTIONS = ("steam", "youtube", "chzzk", "urls", "app", "theme")
+
+
+def _FlattenKeys(dictValue: dict, strPrefix: str = "") -> set:
+    """{"a": {"b": 1}} → {"a.b"}  (칸 이름을 점으로 이어서 모아요)"""
+    setKeys = set()
+    for strKey, objValue in dictValue.items():
+        strName = f"{strPrefix}.{strKey}" if strPrefix else strKey
+        if isinstance(objValue, dict) and objValue:
+            setKeys |= _FlattenKeys(objValue, strName)
+        else:
+            setKeys.add(strName)
+    return setKeys
+
+
+def DescribeImport(strSourcePath: str) -> dict:
+    """이전 설정 파일을 읽어서, 가져오면 어떻게 되는지 알려줘요. (아무것도 쓰지 않아요)
+
+    돌려주는 값:
+        merged      : 지금 버전의 기본 양식 위에 이전 값을 얹은 설정 (이걸 저장하면 돼요)
+        bChzzkKeys  : 치지직 Client ID / Secret 이 들어 있는지
+        bChzzkLogin : 치지직 로그인 정보(토큰)가 들어 있는지
+        bSteam      : 스팀 API 키가 들어 있는지
+        bYouTube    : 유튜브 API 키가 들어 있는지
+        listAdded   : 이전 파일에 없어서 새 버전의 기본값으로 채운 칸 이름들
+    (비밀 값 자체는 돌려주지 않아요. 있는지 없는지만 알려줘요.)
+    """
+    if not os.path.isfile(strSourcePath):
+        raise RuntimeError(f"파일을 찾을 수 없어요: {strSourcePath}")
+    try:
+        with open(strSourcePath, "r", encoding="utf-8") as objFile:
+            dictSource = json.load(objFile)
+    except (OSError, ValueError) as objError:
+        raise RuntimeError(f"설정 파일을 읽을 수 없어요 (JSON 형식 확인): {objError}") from objError
+    if not isinstance(dictSource, dict) or not any(isinstance(dictSource.get(strSection), dict)
+                                                   for strSection in TUPLE_CONFIG_SECTIONS):
+        raise RuntimeError("이 프로그램의 설정 파일(init.json)이 아닌 것 같아요.")
+
+    dictMerged = _DeepCopy(DICT_DEFAULT_CONFIG)
+    _MergeInto(dictMerged, dictSource)
+
+    def _Get(strSection: str, strKey: str):
+        dictPart = dictSource.get(strSection)
+        return dictPart.get(strKey) if isinstance(dictPart, dict) else None
+
+    return {
+        "merged": dictMerged,
+        "bChzzkKeys": bool(_Get("chzzk", "client_id") and _Get("chzzk", "client_secret")),
+        "bChzzkLogin": bool(_Get("chzzk", "refresh_token")),
+        "bSteam": bool(_Get("steam", "api_key")),
+        "bYouTube": bool(_Get("youtube", "api_key")),
+        "listAdded": sorted(_FlattenKeys(dictMerged) - _FlattenKeys(dictSource)),
+    }
+
+
+def ImportConfig(strSourcePath: str, strDestPath: str = STR_CONFIG_PATH) -> dict:
+    """이전 버전의 설정 파일을 지금 설정 파일(기본 data/init.json)로 가져와요.
+
+    - 이전 값은 그대로 이어받고, 새 버전에서 새로 생긴 칸은 기본값으로 채워요.
+    - 지금 설정 파일이 있으면 '파일이름.bak' 으로 백업해 둬요. (잘못 가져왔을 때 되돌릴 수 있게)
+    - 이전 설정 파일은 건드리지 않아요.
+    돌려주는 값: DescribeImport 의 결과
+    """
+    bBothExist = os.path.exists(strSourcePath) and os.path.exists(strDestPath)
+    if bBothExist and os.path.samefile(strSourcePath, strDestPath):
+        raise RuntimeError("지금 쓰고 있는 설정 파일이에요. 이전 버전 폴더의 data/init.json 을 골라 주세요.")
+    dictInfo = DescribeImport(strSourcePath)
+    with OBJ_SAVE_LOCK:
+        if os.path.exists(strDestPath):
+            shutil.copy2(strDestPath, strDestPath + ".bak")
+        SaveConfig(dictInfo["merged"], strDestPath)
+    return dictInfo
+
+
+def ReplaceInPlace(dictTarget: dict, dictSource: dict) -> None:
+    """dictTarget 의 내용을 dictSource 와 똑같이 바꿔요. (dict 객체 자체는 그대로 둬요)
+
+    프로그램 곳곳이 설정 안쪽 dict 를 붙잡고 있어서(예: 미션 창의 app 설정), 새 dict 로 갈아 끼우면
+    그쪽만 옛 값을 계속 들고 있게 돼요. 그래서 안쪽부터 같은 객체에 값만 바꿔 넣어요.
+    """
+    for strKey in [strKey for strKey in dictTarget if strKey not in dictSource]:
+        del dictTarget[strKey]
+    for strKey, objValue in dictSource.items():
+        if isinstance(objValue, dict) and isinstance(dictTarget.get(strKey), dict):
+            ReplaceInPlace(dictTarget[strKey], objValue)
+        else:
+            dictTarget[strKey] = _DeepCopy({"v": objValue})["v"]
 
 
 def MakeUploadConfig(dictConfig: dict, strPath: str = STR_UPLOAD_CONFIG_PATH) -> dict:

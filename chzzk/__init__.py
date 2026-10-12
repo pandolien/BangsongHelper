@@ -16,7 +16,9 @@ from .chzzk_session import (
     ChzzkChatMessage,
     ChzzkChatSession,
     ChzzkDonationMessage,
+    ChzzkSubscriptionMessage,
     ParseChatMessage,
     ParseDonationMessage,
+    ParseSubscriptionMessage,
     RE_EMOJI_PLACEHOLDER,
 )

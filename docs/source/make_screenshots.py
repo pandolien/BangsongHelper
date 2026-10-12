@@ -70,6 +70,8 @@ def Main() -> None:
     import youtube.youtube_chat as ytc
     ytc.YouTubeQuotaTracker.__init__.__defaults__ = (os.path.join(TMP, "youtube_quota.json"),)
     import gui.main_window as mw
+    import app_log
+    app_log.OBJ_LOGGER = app_log.AppLogger(os.path.join(TMP, "Log"))  # 가짜 기록이 진짜 Log 폴더에 안 쓰이게
     import gui.donation_window as dwm
     import gui.mission_window as mwm
     import gui.chat_window as cwm
@@ -152,6 +154,9 @@ def Main() -> None:
         objWin.objYouTubeHub.sigDonation.emit(SuperChatToDonation(YouTubeChatMessage(
             "슈챗러", "유튜브에서도 응원해요", dtNow, strType="superChatEvent", strAmountText="₩5,000",
             nAmountMicros=5_000_000_000, strCurrency="KRW")))
+        from chzzk import ParseSubscriptionMessage
+        objHub.sigDonation.emit(ParseSubscriptionMessage(
+            {"subscriberNickname": "구독자A", "tierNo": 1, "tierName": "멤버십", "month": 3}).ToDonation())
         Pump()
         objWin.objDonationWindow.listRecords[0].strState = "done"
         objWin.objDonationWindow._RefreshRow(0)
@@ -159,7 +164,7 @@ def Main() -> None:
         # 타이머 파일은 임시 폴더에 쓰지만, 화면에는 진짜 위치를 보여줘요.
         objMissionView.lblTimerPath.setText(os.path.join(STR_ROOT, "data", "mission_timer.txt"))
         objMissionView.AddMission(mwm.MissionRecord(dtNow, "후원자E", 20000, "30분 안에 보스 클리어", 1800))
-        objMissionView._ToggleRun([0])
+        objMissionView._StartSelected([0])
         objMissionView.listMissions[0].fEndAt = time.time() + 437  # 07:17 남은 것처럼
         objMissionView._OnTick()
         objWin.objDonationWindow.tblDonations.clearSelection()

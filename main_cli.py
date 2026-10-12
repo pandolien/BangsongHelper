@@ -31,7 +31,10 @@ from chzzk import ChzzkApiClient, ChzzkApiError, ChzzkAuthRequiredError, LoginWi
 from game_detect import DetectedGame, KeyFromInput, KeyToDisplay, ListFolderGames, ListRunningExeNames, PickCurrentGame
 from category_match import FallbackCategory, FindCategoryForGame, IsFallbackCategory
 from game_map import GameMap, GameMapEntry
-from config_manager import STR_UPLOAD_CONFIG_PATH, MakeUploadConfig, LoadConfig, StoreTokenToConfig, TokenFromConfig
+from config_manager import (
+    STR_CONFIG_PATH, STR_UPLOAD_CONFIG_PATH, ImportConfig, MakeUploadConfig, LoadConfig, StoreTokenToConfig,
+    TokenFromConfig,
+)
 from steam import SteamApiClient, SteamApiError
 
 
@@ -98,8 +101,28 @@ def PrintStatus(dictConfig: dict) -> None:
         print(f"[치지직] [오류] {objError}")
 
 
+def ImportOldConfig(strSourcePath: str) -> int:
+    """이전 버전 폴더의 설정 파일을 지금 설정으로 가져와요. (새 버전으로 옮길 때 한 번)"""
+    if not strSourcePath.strip():
+        print("이전 버전의 설정 파일 경로를 적어 주세요.\n"
+              "   예) run.bat import-config \"D:\\이전폴더\\data\\init.json\"")
+        return 2
+    dictInfo = ImportConfig(strSourcePath.strip().strip('"'))
+    listFound = [strLabel for bFound, strLabel in (
+        (dictInfo["bChzzkKeys"], "치지직 Client ID / Secret"), (dictInfo["bChzzkLogin"], "치지직 로그인"),
+        (dictInfo["bSteam"], "스팀 API 키"), (dictInfo["bYouTube"], "유튜브 API 키")) if bFound]
+    print(f"이전 설정을 가져왔어요 → {STR_CONFIG_PATH}")
+    print("  이어받은 것: " + (" · ".join(listFound) if listFound else "(키 · 로그인 정보는 비어 있었어요)") + " + 프로그램 설정")
+    print(f"  새로 생긴 칸 {len(dictInfo['listAdded'])}개는 기본값으로 채웠어요.")
+    print(f"  (예전 설정은 {STR_CONFIG_PATH}.bak 으로 백업했어요)")
+    return 0
+
+
 def RunCommand(objArgs: argparse.Namespace, dictConfig: dict) -> int:
     strCommand = objArgs.strCommand or "status"
+
+    if strCommand == "import-config":
+        return ImportOldConfig(objArgs.strText)
 
     if strCommand == "status":
         PrintStatus(dictConfig)
@@ -304,7 +327,7 @@ def main() -> int:
         "strCommand", nargs="?", default="status",
         choices=["status", "watch", "login", "logout", "setting", "set-title",
                  "set-category", "chat", "notice", "sync-game", "game-map", "game-map-add",
-                 "game-map-remove", "make-upload-config"],
+                 "game-map-remove", "make-upload-config", "import-config"],
         metavar="명령",
     )
     objParser.add_argument("strText", nargs="?", default="", metavar="내용")

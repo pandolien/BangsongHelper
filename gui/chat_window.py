@@ -103,6 +103,7 @@ class ChatWindow(QWidget):
         self._OnStatus(self.objHub.strLastState, "")
         self.objHub.sigChat.connect(self._AppendChat)
         self.objHub.sigDonation.connect(self._AppendDonation)
+        self.objHub.sigSubscriptionState.connect(self._OnSubscriptionState)
         self.objHub.sigStatus.connect(self._OnStatus)
 
         # 유튜브 채팅 (있으면): [YT] 로 섞어서 보여줘요. 슈퍼챗은 노란 줄로.
@@ -352,18 +353,27 @@ class ChatWindow(QWidget):
         self._AppendHtml(strHtml)
 
     def _AppendDonation(self, objDonation: ChzzkDonationMessage) -> None:
-        strKind = {"VIDEO": "영상 후원", "MISSION": "미션 후원", "YOUTUBE": "[YT] 슈퍼챗"}.get(objDonation.strDonationType, "후원")
+        strKind = {"VIDEO": "영상 후원", "MISSION": "미션 후원", "YOUTUBE": "[YT] 슈퍼챗",
+                   "SUBSCRIPTION": "구독"}.get(objDonation.strDonationType, "후원")
         strText = self._ContentHtml(objDonation.strText) if objDonation.strText else ""
-        strTestTag = "<span style='color:#868e96'>(테스트)</span> " if objDonation.bTest else ""
         strHtml = (f"<table width='100%' cellpadding='4' style='background:#fff3bf; color:{STR_DONATION_TEXT}'>"
                    f"<tr><td style='color:{STR_DONATION_TEXT}'>"
                    f"{self._TimeHtml(objDonation.dtTime)}"
-                   f"{strTestTag}"
-                   f"<b style='color:#e67700'>{strKind} {self._AmountText(objDonation)}</b> "
+                   f"<b style='color:#e67700'>{strKind}"
+                   f"{'' if objDonation.strDonationType == 'SUBSCRIPTION' else ' ' + self._AmountText(objDonation)}</b> "
                    f"<b style='color:{STR_DONATION_TEXT}'>{html.escape(objDonation.strNickname)}</b>"
                    f"{'<br>' + strText if strText else ''}</td></tr></table>")
         self._AppendHtml(strHtml)
-        self.fnLog(f"[후원] {objDonation.strNickname} {objDonation.nPayAmount:,}원")
+        strLogText = (objDonation.strText or "").replace("\n", " ")
+        strLogAmount = "" if objDonation.strDonationType == "SUBSCRIPTION" else self._AmountText(objDonation) + " "
+        self.fnLog(f"[{'구독' if objDonation.strDonationType == 'SUBSCRIPTION' else '후원'}] {strKind} {strLogAmount}"
+                   f"{objDonation.strNickname}" + (f" — {strLogText[:80]}" if strLogText else ""))
+
+    def _OnSubscriptionState(self, objOk, strReason: str) -> None:
+        """구독 알림 신청이 거절됐으면 한 번 알려요. (채팅 · 후원은 그대로 와요)"""
+        if objOk is False:
+            self._AppendSystem(f"구독 알림을 받을 수 없어요: {strReason}")
+            self.fnLog(f"[구독] 구독 알림을 받을 수 없어요: {strReason}")
 
     @staticmethod
     def _AmountText(objDonation: ChzzkDonationMessage) -> str:

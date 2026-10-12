@@ -62,6 +62,7 @@ DICT_DEFAULT_CHZZK_URLS = {
     "session_auth": "/open/v1/sessions/auth",                        # 실시간 채팅 받기용 접속 주소 발급
     "session_subscribe_chat": "/open/v1/sessions/events/subscribe/chat",
     "session_subscribe_donation": "/open/v1/sessions/events/subscribe/donation",
+    "session_subscribe_subscription": "/open/v1/sessions/events/subscribe/subscription",
     "chat_blind": "/open/v1/chats/blind-message",                    # 채팅 메시지 가리기
     "temporary_restrict": "/open/v1/temporary-restrict-channels",    # 임시 제한 (30초 → 60초 ... 치지직이 정함)
     "restrict": "/open/v1/restrict-channels",                        # 활동 제한
@@ -749,6 +750,11 @@ class ChzzkApiClient:
     def SubscribeDonationEvent(self, strSessionKey: str) -> None:
         """'후원 알림도 보내주세요' 하고 신청해요. (권한: 후원 조회)"""
         self._Request("POST", self._OpenUrl("session_subscribe_donation"), bUseUserToken=True,
+                      dictParams={"sessionKey": strSessionKey})
+
+    def SubscribeSubscriptionEvent(self, strSessionKey: str) -> None:
+        """'구독 알림도 보내주세요' 하고 신청해요. (권한: 구독 조회)"""
+        self._Request("POST", self._OpenUrl("session_subscribe_subscription"), bUseUserToken=True,
                       dictParams={"sessionKey": strSessionKey})
 
     @staticmethod

@@ -16,7 +16,7 @@ import os
 import threading
 from typing import Callable, Optional
 
-from app_paths import DataPath
+from app_paths import RecordPath
 
 from .youtube_api import QuotaDayKey, YouTubeApiClient, YouTubeApiError, YouTubeChatMessage, YouTubeLiveInfo
 
@@ -24,7 +24,7 @@ N_DAILY_QUOTA = 10_000
 N_FIRST_SHOW = 5              # 연결하자마자 보여줄 '최근 채팅' 수 (예전 채팅이 한꺼번에 쏟아지지 않게)
 N_RETRY_FIRST_SEC = 5
 N_RETRY_MAX_SEC = 60
-STR_QUOTA_FILE = DataPath("youtube_quota.json")
+STR_QUOTA_FILE = RecordPath("youtube_quota.json")
 
 
 class YouTubeQuotaTracker:

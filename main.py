@@ -27,6 +27,8 @@ def _RedirectOutputForExe() -> None:
 
 
 def main() -> int:
+    # 설정 파일 옵션(--test 등)을 먼저 꺼내요. (이걸 안 하면 아래에서 '명령어가 붙어 있다' 고 CLI 로 들어가요)
+    import app_paths  # noqa: F401  (불러오는 순간 sys.argv 에서 옵션을 지워요)
     _RedirectOutputForExe()
     # 뒤에 명령어가 붙어 있으면 CLI, 아무것도 없으면 GUI 로 실행해요.
     if len(sys.argv) > 1:

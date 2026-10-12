@@ -28,6 +28,7 @@ class ChatHub(QObject):
     sigDonation = Signal(object)    # ChzzkDonationMessage
     sigStatus = Signal(str, str)    # 상태, 설명
     sigDonationState = Signal(object, str)  # 후원 알림을 받을 수 있는지 (True / False / None=아직 모름), 이유
+    sigSubscriptionState = Signal(object, str)  # 구독 알림을 받을 수 있는지, 이유
 
     def __init__(self, fnGetClient: Callable[[], Optional[ChzzkApiClient]]):
         super().__init__()
@@ -69,6 +70,10 @@ class ChatHub(QObject):
             fnOnDonation=self.sigDonation.emit,
             fnOnStatus=self.sigStatus.emit,
             fnOnDonationState=self.sigDonationState.emit,
+            # 구독은 '후원 모양' 으로 바꿔서 후원과 같은 길(sigDonation)로 보내요.
+            # → 후원 목록 · 채팅창 노란 줄 · 알림 소리 · 로그가 그대로 적용돼요.
+            fnOnSubscription=lambda objSubscription: self.sigDonation.emit(objSubscription.ToDonation()),
+            fnOnSubscriptionState=self.sigSubscriptionState.emit,
         )
         self.objSession.Start()
         return True

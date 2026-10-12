@@ -12,3 +12,10 @@ build/
 dist/
 data/error.log
 data/youtube_quota.json
+
+Log/
+
+# 시험용 설정(run.bat --test)과 그 기록 파일
+data/init_test.json
+data/*_test.*
+data/*.bak

@@ -8,10 +8,9 @@
 미션이 등록되는 방법
     1) 후원 메시지가 정한 단어(기본: "미션")로 시작하면 → 자동 등록   예) "미션: 노데스로 보스 잡기"
     2) 후원 종류가 MISSION 이면 → 자동 등록 (치지직이 보내준다면)
-    3) 후원 목록에서 [미션으로 만들기] / 이 창에서 [미션 추가]
 
 타이머
-    - [시작] 을 누르면 제한 시간이 줄어들어요. 일시정지 · 재개, +1분 / -1분 가능
+    - 받은 미션은 [받기] → 제한 시간이 줄어들어요. 끝나면 [성공] / [실패] 중 하나만 정하면 돼요.
     - 시간이 끝나면 '시간 초과' 로 빨갛게 바뀌고 소리로 알려줘요. (성공 / 실패는 직접 눌러요)
     - 맨 위에 진행 중인 미션의 큰 타이머가 나와요.
     - OBS 용 타이머 파일(data/mission_timer.txt)을 1초마다 써요.
@@ -33,18 +32,18 @@ import socketio  # noqa: F401  (순서 맞추기용)
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
-from app_paths import STR_DATA_DIR
+from app_paths import RecordPath
 from chzzk import ChzzkDonationMessage, RE_EMOJI_PLACEHOLDER
 from gui.bg_task import RunTask
 from gui.chat_hub import ChatHub
 
-STR_MISSION_FILE = os.path.join(STR_DATA_DIR, "missions.json")
-STR_TIMER_FILE = os.path.join(STR_DATA_DIR, "mission_timer.txt")
+STR_MISSION_FILE = RecordPath("missions.json")
+STR_TIMER_FILE = RecordPath("mission_timer.txt")
 N_MAX_SAVED_MISSIONS = 1000
 
 # 상태 → (화면 글자, 색)
@@ -57,7 +56,7 @@ DICT_MISSION_STATE = {
     "fail": ("실패", "#c92a2a"),
     "reject": ("거절", "#868e96"),
 }
-SET_FINISHED_STATES = {"success", "fail", "reject"}   # 끝난 미션
+SET_FINISHED_STATES = {"success", "fail", "reject"}   # 끝난 미션 (reject 는 예전 버전에서 저장된 미션을 읽으려고 남겨요)
 
 # 설정 기본값 (data/init.json 의 app 칸에 저장돼요)
 DICT_DEFAULT_MISSION_SETTINGS = {
@@ -91,7 +90,6 @@ class MissionRecord:
     strState: str = "wait"
     fEndAt: float = 0.0          # 진행 중일 때: 끝나는 시각 (time.time() 기준)
     fRemainSec: float = -1.0     # 대기 · 일시정지일 때: 남은 시간
-    bTest: bool = False          # 테스트 미션 (저장 · 채팅 알림 안 함)
 
     def __post_init__(self):
         if self.fRemainSec < 0:
@@ -115,19 +113,6 @@ class MissionRecord:
         self.fEndAt = time.time() + self.fRemainSec
         self.strState = "run"
 
-    def Pause(self) -> None:
-        self.fRemainSec = self.fLeftSec
-        self.strState = "pause"
-
-    def AddSec(self, nSec: int) -> None:
-        if self.strState == "run":
-            self.fEndAt = max(time.time(), self.fEndAt + nSec)
-        elif self.strState == "timeout" and nSec > 0:
-            self.fRemainSec = float(nSec)  # 시간 초과된 미션에 시간을 더 주면 → 다시 진행
-            self.Start()
-        else:
-            self.fRemainSec = max(0.0, self.fRemainSec + nSec)
-
     def Finish(self, strState: str) -> None:
         self.fRemainSec = self.fLeftSec
         self.strState = strState
@@ -150,41 +135,6 @@ class MissionRecord:
             fEndAt=float(dictItem.get("end_at") or 0),
             fRemainSec=float(dictItem.get("remain") if dictItem.get("remain") is not None else -1),
         )
-
-
-class _AddMissionDialog(QDialog):
-    """[미션 추가] 창: 닉네임 · 금액 · 내용 · 제한 시간."""
-
-    def __init__(self, nDefaultMin: int, objParent: Optional[QWidget] = None):
-        super().__init__(objParent)
-        self.setWindowTitle("미션 추가")
-        objForm = QFormLayout(self)
-        self.editNick = QLineEdit()
-        self.editNick.setPlaceholderText("후원자 닉네임 (비워도 됨)")
-        self.spinAmount = QSpinBox()
-        self.spinAmount.setRange(0, 100_000_000)
-        self.spinAmount.setSingleStep(1000)
-        self.spinAmount.setSuffix(" 원")
-        self.editText = QLineEdit()
-        self.editText.setPlaceholderText("미션 내용 (예: 노데스로 보스 잡기)")
-        self.spinMin = QSpinBox()
-        self.spinMin.setRange(1, 600)
-        self.spinMin.setValue(nDefaultMin)
-        self.spinMin.setSuffix(" 분")
-        objForm.addRow("닉네임", self.editNick)
-        objForm.addRow("금액", self.spinAmount)
-        objForm.addRow("미션 내용", self.editText)
-        objForm.addRow("제한 시간", self.spinMin)
-        objButtons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        objButtons.accepted.connect(self._OnOk)
-        objButtons.rejected.connect(self.reject)
-        objForm.addRow(objButtons)
-
-    def _OnOk(self) -> None:
-        if not self.editText.text().strip():
-            QMessageBox.information(self, "안내", "미션 내용을 입력해 주세요.")
-            return
-        self.accept()
 
 
 class MissionWindow(QWidget):
@@ -330,41 +280,24 @@ class MissionWindow(QWidget):
         for nCol in (N_COL_TIME, N_COL_NICK, N_COL_AMOUNT, N_COL_LEFT, N_COL_STATE):
             objHeader.setSectionResizeMode(nCol, QHeaderView.ResizeMode.ResizeToContents)
         objHeader.setSectionResizeMode(N_COL_TEXT, QHeaderView.ResizeMode.Stretch)
-        self.tblMissions.cellDoubleClicked.connect(lambda nRow, _nCol: self._ToggleRun([nRow]))
-        self.tblMissions.itemSelectionChanged.connect(self._UpdateButtons)
+        self.tblMissions.cellDoubleClicked.connect(lambda nRow, _nCol: self._StartSelected([nRow]))
         objLayout.addWidget(self.tblMissions, 1)
 
-        # --- 버튼 ---
-        objRowA = QHBoxLayout()
-        btnAdd = QPushButton("미션 추가...")
-        btnAdd.clicked.connect(self.OnAddClicked)
-        self.btnStart = QPushButton("시작 / 일시정지")
-        self.btnStart.clicked.connect(lambda: self._ToggleRun(self._SelectedRows()))
-        btnMinus = QPushButton("-1분")
-        btnMinus.clicked.connect(lambda: self._AddTime(-60))
-        btnPlus = QPushButton("+1분")
-        btnPlus.clicked.connect(lambda: self._AddTime(60))
-        for btnItem in (btnAdd, self.btnStart, btnMinus, btnPlus):
-            objRowA.addWidget(btnItem)
-        objRowA.addStretch()
-        objLayout.addLayout(objRowA)
-
-        objRowB = QHBoxLayout()
-        for strLabel, strState in (("성공", "success"), ("실패", "fail"), ("거절", "reject")):
+        # --- 버튼: 받은 미션은 [받기] → [성공] / [실패] 만 정해요 ---
+        objRow = QHBoxLayout()
+        self.btnStart = QPushButton("받기")
+        self.btnStart.setToolTip("고른 미션을 받아서 타이머를 시작해요. (더블클릭도 같아요)")
+        self.btnStart.clicked.connect(lambda: self._StartSelected(self._SelectedRows()))
+        objRow.addWidget(self.btnStart)
+        for strLabel, strState in (("성공", "success"), ("실패", "fail")):
             btnItem = QPushButton(strLabel)
             btnItem.clicked.connect(lambda _=False, strState=strState: self._FinishSelected(strState))
-            objRowB.addWidget(btnItem)
-        btnBack = QPushButton("대기로 되돌리기")
-        btnBack.clicked.connect(self._ResetSelected)
-        btnDelete = QPushButton("삭제")
-        btnDelete.clicked.connect(self._DeleteSelected)
-        objRowB.addWidget(btnBack)
-        objRowB.addStretch()
-        objRowB.addWidget(btnDelete)
-        objLayout.addLayout(objRowB)
+            objRow.addWidget(btnItem)
+        objRow.addStretch()
+        objLayout.addLayout(objRow)
 
-        lblHelp = QLabel("더블클릭: 시작 ↔ 일시정지.  시간이 끝나면 '시간 초과' 로 바뀌어요 → 성공 / 실패를 눌러 마무리하세요.  "
-                         "시간 초과된 미션에 +1분을 누르면 다시 진행돼요.")
+        lblHelp = QLabel("미션을 고르고 [받기] (더블클릭도 돼요) → 타이머가 시작돼요.  끝나면 [성공] / [실패] 를 눌러 마무리하세요.  "
+                         "시간이 끝나면 '시간 초과' 로 바뀌어요.")
         lblHelp.setWordWrap(True)
         lblHelp.setStyleSheet("color: #6b7280;")
         objLayout.addWidget(lblHelp)
@@ -417,32 +350,14 @@ class MissionWindow(QWidget):
             return
         self.AddMission(MissionRecord(
             dtTime=objDonation.dtTime, strNickname=objDonation.strNickname, nAmount=objDonation.nPayAmount,
-            strText=strMission, nDurationSec=int(self.dictApp["mission_default_min"]) * 60, bTest=objDonation.bTest,
-        ))
-
-    def AddFromDonationRecord(self, objRecord) -> None:
-        """후원 목록의 한 줄을 미션으로 만들어요. ([미션으로 만들기] 버튼)"""
-        self.AddMission(MissionRecord(
-            dtTime=objRecord.dtTime, strNickname=objRecord.strNickname, nAmount=objRecord.nPayAmount,
-            strText=objRecord.strText, nDurationSec=int(self.dictApp["mission_default_min"]) * 60,
-            bTest=getattr(objRecord, "bTest", False),
-        ))
-
-    def OnAddClicked(self) -> None:
-        objDialog = _AddMissionDialog(int(self.dictApp["mission_default_min"]), self)
-        if objDialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        self.AddMission(MissionRecord(
-            dtTime=datetime.now(), strNickname=objDialog.editNick.text().strip() or "-",
-            nAmount=objDialog.spinAmount.value(), strText=objDialog.editText.text().strip(),
-            nDurationSec=objDialog.spinMin.value() * 60,
+            strText=strMission, nDurationSec=int(self.dictApp["mission_default_min"]) * 60,
         ))
 
     def AddMission(self, objMission: MissionRecord) -> None:
         nRow = self._AddRow(objMission)
         self._Save()
         self._UpdateSummary()
-        self.fnLog(f"[미션] {'(테스트) ' if objMission.bTest else ''}새 미션: {objMission.strNickname} "
+        self.fnLog(f"[미션] 새 미션: {objMission.strNickname} "
                    f"{objMission.nAmount:,}원 — {objMission.strText} (제한 {FormatSec(objMission.nDurationSec)})")
         if not self.tblMissions.isRowHidden(nRow):
             self.tblMissions.scrollToBottom()
@@ -455,7 +370,7 @@ class MissionWindow(QWidget):
         nRow = self.tblMissions.rowCount()
         self.tblMissions.insertRow(nRow)
         bToday = objMission.dtTime.date() == datetime.now().date()
-        strNick = objMission.strNickname + (" (테스트)" if objMission.bTest else "")
+        strNick = objMission.strNickname
         listCells = [objMission.dtTime.strftime("%H:%M" if bToday else "%m-%d %H:%M"), strNick,
                      f"{objMission.nAmount:,}원", objMission.strText, "", ""]
         for nCol, strCell in enumerate(listCells):
@@ -500,11 +415,6 @@ class MissionWindow(QWidget):
             QMessageBox.information(self, "안내", "목록에서 미션을 먼저 골라 주세요.")
         return listRows
 
-    def _UpdateButtons(self) -> None:
-        listRows = self._SelectedRows()
-        bAnyRunning = any(self.listMissions[nRow].strState == "run" for nRow in listRows)
-        self.btnStart.setText("일시정지" if bAnyRunning else "시작 / 재개")
-
     def _UpdateSummary(self) -> None:
         nActive = sum(1 for objMission in self.listMissions if not objMission.bFinished)
         nRunning = sum(1 for objMission in self.listMissions if objMission.strState == "run")
@@ -512,36 +422,23 @@ class MissionWindow(QWidget):
         nFail = sum(1 for objMission in self.listMissions if objMission.strState == "fail")
         self.lblSummary.setText(f"남은 미션 {nActive}개 (진행 중 {nRunning})   |   성공 {nSuccess} · 실패 {nFail}")
         self.sigActiveChanged.emit(nActive)
-        self._UpdateButtons()
 
     # ===================================================================
     # 미션 조작
     # ===================================================================
-    def _ToggleRun(self, listRows: List[int]) -> None:
+    def _StartSelected(self, listRows: List[int]) -> None:
+        """[받기]: 고른 미션을 받아서 타이머를 시작해요. (대기 중인 미션만. 진행 중 · 끝난 미션은 그대로)"""
         if not listRows:
             self._RequireSelection()
             return
-        bPause = any(self.listMissions[nRow].strState == "run" for nRow in listRows)
         for nRow in listRows:
             objMission = self.listMissions[nRow]
-            if objMission.bFinished:
+            if objMission.strState not in ("wait", "pause"):
                 continue
-            if bPause:
-                if objMission.strState == "run":
-                    objMission.Pause()
-            elif objMission.strState != "run":
-                objMission.Start()
-                self._Announce(objMission, f"[미션 시작] {objMission.strNickname}님 미션: {objMission.strText} "
-                                           f"(제한 {FormatSec(objMission.fLeftSec)})")
+            objMission.Start()
+            self._Announce(objMission, f"[미션 시작] {objMission.strNickname}님 미션: {objMission.strText} "
+                                       f"(제한 {FormatSec(objMission.fLeftSec)})")
             self._PaintRow(nRow)
-        self._AfterChange()
-
-    def _AddTime(self, nSec: int) -> None:
-        for nRow in self._RequireSelection():
-            objMission = self.listMissions[nRow]
-            if not objMission.bFinished:
-                objMission.AddSec(nSec)
-                self._PaintRow(nRow)
         self._AfterChange()
 
     def _FinishSelected(self, strState: str) -> None:
@@ -552,28 +449,7 @@ class MissionWindow(QWidget):
             self._PaintRow(nRow)
             self._ApplyFilterToRow(nRow)
             self.fnLog(f"[미션] {strName}: {objMission.strNickname} — {objMission.strText}")
-            if strState != "reject":
-                self._Announce(objMission, f"[미션 {strName}] {objMission.strNickname}님 미션: {objMission.strText}")
-        self._AfterChange()
-
-    def _ResetSelected(self) -> None:
-        for nRow in self._RequireSelection():
-            objMission = self.listMissions[nRow]
-            objMission.strState = "wait"
-            objMission.fRemainSec = float(objMission.nDurationSec)
-            self._PaintRow(nRow)
-            self._ApplyFilterToRow(nRow)
-        self._AfterChange()
-
-    def _DeleteSelected(self) -> None:
-        listRows = self._RequireSelection()
-        if not listRows:
-            return
-        if QMessageBox.question(self, "확인", f"미션 {len(listRows)}개를 삭제할까요?") != QMessageBox.StandardButton.Yes:
-            return
-        for nRow in reversed(listRows):  # 뒤에서부터 지워야 줄 번호가 안 꼬여요.
-            del self.listMissions[nRow]
-            self.tblMissions.removeRow(nRow)
+            self._Announce(objMission, f"[미션 {strName}] {objMission.strNickname}님 미션: {objMission.strText}")
         self._AfterChange()
 
     def _AfterChange(self) -> None:
@@ -582,8 +458,8 @@ class MissionWindow(QWidget):
         self._OnTick()
 
     def _Announce(self, objMission: MissionRecord, strMessage: str) -> None:
-        """'채팅으로 알리기' 가 켜져 있으면 채팅으로 보내요. (테스트 미션은 안 보내요)"""
-        if objMission.bTest or not self.dictApp.get("mission_chat_announce"):
+        """'채팅으로 알리기' 가 켜져 있으면 채팅으로 보내요."""
+        if not self.dictApp.get("mission_chat_announce"):
             return
         objClient = self.objHub.fnGetClient()
         if objClient is None or not objClient.bIsLoggedIn:
@@ -697,7 +573,7 @@ class MissionWindow(QWidget):
         self._UpdateSummary()
 
     def _Save(self) -> None:
-        listItems = [objMission.ToDict() for objMission in self.listMissions if not objMission.bTest][-N_MAX_SAVED_MISSIONS:]
+        listItems = [objMission.ToDict() for objMission in self.listMissions][-N_MAX_SAVED_MISSIONS:]
         try:
             os.makedirs(os.path.dirname(self.strSavePath), exist_ok=True)
             strTempPath = self.strSavePath + ".tmp"
