@@ -106,8 +106,14 @@ def Main() -> None:
     with mock.patch.object(mw.MainWindow, "OnRefreshClicked", lambda self: None), \
             mock.patch.object(mw.MainWindow, "OnLoadSettingClicked", lambda self: None), \
             mock.patch.object(mw.MainWindow, "_AutoSyncCategory", lambda self, objGame: None):
+        # 오른쪽 리모컨은 (네이버 로그인이 필요해서) 안내 글만 보이게 해요. 인터넷에 접속하지 않아요.
+        import gui.remote_panel as rpm
+        rpm.RemotePanel.EnsureLoaded = lambda self: self._ShowMessage(
+            "치지직 스튜디오의 <b>리모컨 화면</b>이 여기에 나와요.<br>(네이버 로그인이 필요해요)")
+        mw.MainWindow._CheckWhatsNew = lambda self: None  # 안내 창이 스크린샷에 안 뜨게
         objWin = mw.MainWindow()
-        objWin.resize(1280, 800)
+        objWin.actTools.setChecked(True)  # 설명 자료에는 후원 목록 · 미션 화면을 보여줘요.
+        objWin.resize(1480, 800)
         objWin.show()
 
         # ---------------------------------------------------------------- 맨 위 막대 · 방송 상태

@@ -63,6 +63,7 @@ DICT_DEFAULT_CHZZK_URLS = {
     "session_subscribe_chat": "/open/v1/sessions/events/subscribe/chat",
     "session_subscribe_donation": "/open/v1/sessions/events/subscribe/donation",
     "session_subscribe_subscription": "/open/v1/sessions/events/subscribe/subscription",
+    "subscribers": "/open/v1/channels/subscribers",
     "chat_blind": "/open/v1/chats/blind-message",                    # 채팅 메시지 가리기
     "temporary_restrict": "/open/v1/temporary-restrict-channels",    # 임시 제한 (30초 → 60초 ... 치지직이 정함)
     "restrict": "/open/v1/restrict-channels",                        # 활동 제한
@@ -728,6 +729,25 @@ class ChzzkApiClient:
             if not strNext:
                 break
         return listAll
+
+    def FindSubscriber(self, strChannelId: str, nMaxPages: int = 10, nSize: int = 50) -> dict:
+        """구독자 목록에서 그 시청자를 찾아요. (권한: 구독 조회)
+
+        치지직은 이름으로 찾는 기능이 없어서 50명씩 넘겨 가며 훑어요. (nMaxPages 쪽까지만)
+        돌려주는 값: {"found": 찾은 항목 또는 None, "bAll": 끝까지 다 봤는지, "nChecked": 훑어본 사람 수}
+        """
+        nChecked = 0
+        for nPage in range(nMaxPages):
+            dictContent = self._Request("GET", self._OpenUrl("subscribers"), bUseUserToken=True,
+                                        dictParams={"page": nPage, "size": nSize, "sort": "RECENT"}) or {}
+            listData = dictContent.get("data") or []
+            for dictItem in listData:
+                nChecked += 1
+                if dictItem.get("channelId") == strChannelId:
+                    return {"found": dictItem, "bAll": False, "nChecked": nChecked}
+            if len(listData) < nSize:  # 마지막 쪽까지 봤어요.
+                return {"found": None, "bAll": True, "nChecked": nChecked}
+        return {"found": None, "bAll": False, "nChecked": nChecked}
 
     # ===================================================================
     # 5. 실시간 채팅 받기 (세션) - 본인 출입증 필요

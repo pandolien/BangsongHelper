@@ -104,6 +104,10 @@ class StreamToolsWindow(QWidget):
         objLayout.addWidget(objView)
         return grpBox
 
+    def SetToolsVisible(self, bVisible: bool) -> None:
+        """후원 목록 · 미션 화면을 보이거나 숨겨요. (숨겨도 후원 받기 · 소리 알림 · 타이머는 계속 돌아요)"""
+        self.objRightSplitter.setVisible(bVisible)
+
     def ShowTab(self, nTab: Optional[int] = None) -> None:
         """창을 열고 (이미 열려 있으면 앞으로) 보여줘요. nTab 쪽(후원 / 미션) 표에 바로 손이 가게 해요."""
         self.show()

@@ -25,6 +25,7 @@
 
 import json
 import os
+import re
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
@@ -45,6 +46,14 @@ from gui.chat_hub import ChatHub
 from gui.test_dialog import TestDialog
 
 STR_STUDIO_URL = "https://studio.chzzk.naver.com/"
+STR_REMOTE_URL = "https://studio.chzzk.naver.com/{channelId}/remotecontrol"
+RE_CHANNEL_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def RemoteControlUrl(strChannelId: str) -> str:
+    """채널 ID 로 치지직 리모컨 주소를 만들어요. 형식이 안 맞거나 비어 있으면 스튜디오 첫 화면 주소."""
+    strChannelId = (strChannelId or "").strip().lower()
+    return STR_REMOTE_URL.format(channelId=strChannelId) if RE_CHANNEL_ID.match(strChannelId) else STR_STUDIO_URL
 
 # 받은 후원을 저장하는 파일 (닉네임 같은 개인정보가 들어 있어서 깃허브에 올리지 않아요)
 STR_DONATION_FILE = RecordPath("donations.json")
@@ -122,6 +131,7 @@ class DonationWindow(QWidget):
         self.listRecords: List[DonationRecord] = []
         self.strSavePath = strSavePath
         self.objTestDialog: Optional[TestDialog] = None
+        self.fnGetChannelId: Callable[[], str] = lambda: ""  # 메인 창이 채널 ID 를 알려줘요. (리모컨 주소용)
 
         self._BuildUi()
         self._LoadRecords()  # 예전에 받아 둔 후원을 불러와요.
@@ -222,9 +232,10 @@ class DonationWindow(QWidget):
         btnSkip.clicked.connect(lambda: self._SetSelectedState("skip"))
         btnWait = QPushButton("대기로 되돌리기")
         btnWait.clicked.connect(lambda: self._SetSelectedState("wait"))
-        btnStudio = QPushButton("치지직 스튜디오 열기")
-        btnStudio.setToolTip("영상 재생 · 건너뛰기는 치지직 스튜디오에서 해요. (공식 API 에 제어 기능이 없어요)")
-        btnStudio.clicked.connect(lambda: webbrowser.open(STR_STUDIO_URL))
+        btnStudio = QPushButton("치지직 리모컨 열기")
+        btnStudio.setToolTip("영상 재생 · 건너뛰기는 치지직 리모컨에서 해요. 평소 쓰는 브라우저로 열려요. "
+                             "(공식 API 에 제어 기능이 없어요)")
+        btnStudio.clicked.connect(self.OpenRemoteControl)
         btnClear = QPushButton("목록 지우기")
         btnClear.clicked.connect(self.OnClearClicked)
         btnTest = QPushButton("테스트 도구")
@@ -239,12 +250,16 @@ class DonationWindow(QWidget):
         objLayout.addLayout(objButtonRow)
 
         lblHelp = QLabel("더블클릭: 대기 ↔ 봄.  여러 줄을 골라 한 번에 바꿀 수 있어요.  "
-                         "영상 재생 · 건너뛰기는 치지직 스튜디오에서 해 주세요. (치지직 API 는 영상 제목만 알려줘요)")
+                         "영상 재생 · 건너뛰기는 [치지직 리모컨 열기] 로 열어서 해 주세요.")
         lblHelp.setWordWrap(True)
         lblHelp.setStyleSheet("color: #6b7280;")
         objLayout.addWidget(lblHelp)
         self.lblHelp = lblHelp
         self.tblDonations.setToolTip(lblHelp.text())
+
+    def OpenRemoteControl(self) -> None:
+        """치지직 리모컨을 기본 브라우저로 열어요. (로그인은 그 브라우저에 되어 있는 걸 써요)"""
+        webbrowser.open(RemoteControlUrl(self.fnGetChannelId()))
 
     # ===================================================================
     # 연결

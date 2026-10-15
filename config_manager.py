@@ -72,7 +72,11 @@ DICT_DEFAULT_CONFIG = {
             # 알림 소리 크기(0~100%) · 음 높이(low / mid / high). 후원 · 구독을 따로 맞춰요. ([설정] → 알림 소리...)
             "donation_sound_volume": 70, "donation_sound_pitch": "mid",
             "subscription_sound_volume": 70, "subscription_sound_pitch": "mid",
-            "ask_import_old_config": True},  # 설정이 비어 있을 때, 이전 버전 설정을 가져올지 켤 때 물어봐요
+            "ask_import_old_config": True,
+            # 마지막으로 업데이트 안내를 본 버전 (새 버전으로 처음 켤 때만 안내를 보여줘요)
+            "last_seen_version": "",
+            # 메인 화면 오른쪽에 치지직 리모컨(스튜디오 화면)을 띄울지 / 후원 목록 · 미션 화면을 보일지
+            "show_remote_panel": True, "show_donation_mission": False},  # 설정이 비어 있을 때, 이전 버전 설정을 가져올지 켤 때 물어봐요
     # 화면 색: 색 묶음 이름 + 그 묶음에서 바꾼 색만 (gui/theme.py)
     "theme": {"preset": "라이트", "colors": {}},
 }

@@ -28,10 +28,10 @@ from typing import Callable, Optional
 # (PySide6 를 먼저 부르면 socketio 가 쓰는 six 라이브러리와 충돌해서 프로그램이 꺼져요)
 import socketio  # noqa: F401  (순서 맞추기용)
 from PySide6.QtCore import QPoint, Qt, QUrl
-from PySide6.QtGui import QColor, QCursor, QFont, QTextCursor
+from PySide6.QtGui import QColor, QCursor, QFont, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox,
-    QTextBrowser, QVBoxLayout, QWidget,
+    QTextBrowser, QToolTip, QVBoxLayout, QWidget,
 )
 
 from chzzk import (
@@ -39,11 +39,16 @@ from chzzk import (
 )
 from gui.bg_task import RunTask
 from gui.chat_hub import ChatHub
+from gui.emoji_cache import EmojiCache, N_HEIGHT as N_EMOJI_HEIGHT
 from gui.restrict_dialog import ExplainRestrictError, RestrictDialog
+from gui.viewer_info_dialog import ViewerInfoDialog
+from moderation_history import ModerationHistory
 from youtube import N_DAILY_QUOTA, YouTubeChatMessage
 
 N_MAX_CHAT_LINES = 500  # 이보다 많아지면 오래된 줄부터 지워요 (메모리 아끼기)
 N_MAX_KEPT_MESSAGES = 1000  # 닉네임 메뉴(제한 · 가리기)에 쓰려고 기억해 두는 최근 채팅 수
+N_MAX_CHATS_PER_USER = 300  # '시청자 정보' 창에 보여주려고 시청자마다 기억해 두는 최근 채팅 수
+N_MAX_REMEMBERED_USERS = 3000  # 이보다 많은 시청자가 쌓이면 오래 말이 없던 시청자부터 잊어요.
 STR_MSG_LINK_PREFIX = "msg:"  # 채팅 줄 링크 모양: msg:번호
 
 # 채팅 줄은 색 자리표시를 넣어 기억해 두고, 화면에 넣을 때 지금 색으로 바꿔요.
@@ -174,6 +179,9 @@ class ChatWindow(QWidget):
         self.spinFontSize.valueChanged.connect(self.OnFontSizeChanged)
         btnClear = QPushButton("지우기")
         btnClear.clicked.connect(self.OnClearClicked)
+        self.btnCopy = QPushButton("복사")
+        self.btnCopy.setToolTip("채팅창에서 드래그해서 고른 글자를 복사해요.\n고른 게 없으면 지금 보이는 채팅 전체를 복사해요.")
+        self.btnCopy.clicked.connect(self.OnCopyClicked)
         btnRestrictList = QPushButton("제한 목록")
         btnRestrictList.setToolTip("활동 제한한 시청자를 보고 풀어줘요.")
         btnRestrictList.clicked.connect(self.OnRestrictListClicked)
@@ -183,6 +191,7 @@ class ChatWindow(QWidget):
         objOptionRow.addStretch()
         objOptionRow.addWidget(self.spinFontSize)
         objOptionRow.addWidget(btnRestrictList)
+        objOptionRow.addWidget(self.btnCopy)
         objOptionRow.addWidget(btnClear)
         objLayout.addLayout(objOptionRow)
 
@@ -191,7 +200,12 @@ class ChatWindow(QWidget):
         self.txtChat.setOpenLinks(False)
         self.txtChat.document().setMaximumBlockCount(N_MAX_CHAT_LINES)
         self.txtChat.setObjectName("Chat")  # 배경 · 글자색은 gui/theme.py 에서
+        self.setEmojiReady: set = set()  # 문서에 올려 둔 이모티콘 그림 주소
+        self.objEmojiCache = EmojiCache(self._OnEmojiReady)  # 메모리에만 보관 (파일로 저장 안 함)
         self.dequeChatHtml = deque(maxlen=N_MAX_CHAT_LINES)  # 다시 그리기용 채팅 줄 (색 자리표시 그대로)
+        self.dictUserChats: "OrderedDict[str, deque]" = OrderedDict()  # 시청자(채널 ID) → 그 시청자의 최근 채팅
+        self.objHistory = ModerationHistory()  # 이 프로그램으로 한 제한 기록 (파일에 저장돼요)
+        self.objViewerInfo = None
         self.strTextColor = "#1f2937"
         self.bDarkBackground = False
         self.txtChat.setToolTip("닉네임을 누르거나 채팅을 우클릭하면 임시 제한 · 가리기 메뉴가 떠요.")
@@ -267,14 +281,25 @@ class ChatWindow(QWidget):
             return ""
         return f"<span style='color:#9ca3af'>{objTime.strftime('%H:%M')}</span> "
 
-    @staticmethod
-    def _ContentHtml(strContent: str) -> str:
-        """글자를 안전하게 바꾸고(HTML 특수문자 처리), 이모티콘 자리는 회색 [이름] 으로 보여줘요."""
+    def _OnEmojiReady(self, strUrl: str, objImage) -> None:
+        """이모티콘 그림을 다 받았어요 → 채팅창 문서에 올려 둬요. (이후 채팅부터 그림으로 나와요)"""
+        self.txtChat.document().addResource(QTextDocument.ResourceType.ImageResource, QUrl(strUrl), objImage)
+        self.setEmojiReady.add(strUrl)
+
+    def _ContentHtml(self, strContent: str, dictEmojis: Optional[dict] = None) -> str:
+        """글자를 안전하게 바꾸고(HTML 특수문자 처리), 이모티콘은 그림으로(아직 못 받았으면 회색 [이름] 으로) 보여줘요."""
+        dictEmojis = dictEmojis or {}
         listParts = []
         nLast = 0
         for objMatch in RE_EMOJI_PLACEHOLDER.finditer(strContent):
             listParts.append(html.escape(strContent[nLast:objMatch.start()]))
-            listParts.append(f"<span style='color:#9ca3af'>[{html.escape(objMatch.group(1))}]</span>")
+            strName = objMatch.group(1)
+            strUrl = dictEmojis.get(strName)
+            if isinstance(strUrl, str) and self.objEmojiCache.Get(strUrl) is not None and strUrl in self.setEmojiReady:
+                listParts.append(f"<img src='{html.escape(strUrl, quote=True)}' height='{N_EMOJI_HEIGHT}' "
+                                 f"alt='{html.escape(strName, quote=True)}'>")
+            else:
+                listParts.append(f"<span style='color:#9ca3af'>[{html.escape(strName)}]</span>")
             nLast = objMatch.end()
         listParts.append(html.escape(strContent[nLast:]))
         return "".join(listParts)
@@ -296,13 +321,38 @@ class ChatWindow(QWidget):
                    f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b></a>"
                    f"<span style='color:#9ca3af'> : </span>"
                    f"<a href='{strLink}' style='text-decoration:none'><span style='color:{STR_TEXT_COLOR_TOKEN}'>"
-                   f"{self._ContentHtml(objMessage.strContent)}</span></a>")
+                   f"{self._ContentHtml(objMessage.strContent, objMessage.dictEmojis)}</span></a>")
         self._AppendHtml(strHtml)
+
+    def _RememberUserChat(self, objMessage: ChzzkChatMessage) -> None:
+        """시청자별 채팅을 모아 둬요. ('시청자 정보' 창용. 프로그램을 끄면 사라져요)"""
+        strId = objMessage.strSenderChannelId
+        if not strId:
+            return
+        dequeUser = self.dictUserChats.pop(strId, None)
+        if dequeUser is None:
+            dequeUser = deque(maxlen=N_MAX_CHATS_PER_USER)
+        dequeUser.append((objMessage.dtTime, objMessage.strPlainContent))
+        self.dictUserChats[strId] = dequeUser  # 맨 뒤 = 가장 최근에 말한 시청자
+        while len(self.dictUserChats) > N_MAX_REMEMBERED_USERS:
+            self.dictUserChats.popitem(last=False)
+
+    def ShowViewerInfo(self, objMessage: ChzzkChatMessage) -> None:
+        """이 시청자의 정보 창을 열어요. (받은 채팅 · 이 프로그램으로 한 제한 · 치지직에서 확인한 상태)"""
+        strId = objMessage.strSenderChannelId
+        dlgInfo = ViewerInfoDialog(
+            objMessage.strNickname, strId, objMessage.strRoleName,
+            list(self.dictUserChats.get(strId, [])), self.objHistory.ListFor(strId), self.fnGetClient, self)
+        dlgInfo.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlgInfo.setWindowFlag(Qt.WindowType.Window, True)
+        dlgInfo.show()
+        self.objViewerInfo = dlgInfo  # (시험 · 확인용으로 마지막 창을 붙잡아 둬요)
 
     def _RememberMessage(self, objMessage: ChzzkChatMessage) -> int:
         nKey = self.nNextMessageKey
         self.nNextMessageKey += 1
         self.dictMessages[nKey] = objMessage
+        self._RememberUserChat(objMessage)
         while len(self.dictMessages) > N_MAX_KEPT_MESSAGES:
             self.dictMessages.popitem(last=False)  # 오래된 것부터 잊어요.
         return nKey
@@ -355,7 +405,7 @@ class ChatWindow(QWidget):
     def _AppendDonation(self, objDonation: ChzzkDonationMessage) -> None:
         strKind = {"VIDEO": "영상 후원", "MISSION": "미션 후원", "YOUTUBE": "[YT] 슈퍼챗",
                    "SUBSCRIPTION": "구독"}.get(objDonation.strDonationType, "후원")
-        strText = self._ContentHtml(objDonation.strText) if objDonation.strText else ""
+        strText = self._ContentHtml(objDonation.strText, objDonation.dictEmojis) if objDonation.strText else ""
         strHtml = (f"<table width='100%' cellpadding='4' style='background:#fff3bf; color:{STR_DONATION_TEXT}'>"
                    f"<tr><td style='color:{STR_DONATION_TEXT}'>"
                    f"{self._TimeHtml(objDonation.dtTime)}"
@@ -486,6 +536,7 @@ class ChatWindow(QWidget):
         objMenu = QMenu(self)
         objTitle = objMenu.addAction(f"{strNick}" + (f"  ({objMessage.strRoleName})" if objMessage.strRoleName else ""))
         objTitle.setEnabled(False)
+        objMenu.addAction("이 시청자 정보 보기...").triggered.connect(lambda: self.ShowViewerInfo(objMessage))
         objMenu.addSeparator()
 
         if objMessage.strUserRole == "streamer":
@@ -502,19 +553,41 @@ class ChatWindow(QWidget):
                 actItem.setEnabled(bHasChatChannel)  # 채팅 채널 ID 가 없으면 못 해요.
             actTemp.triggered.connect(lambda: self._RunModeration(
                 lambda objClient: objClient.TemporaryRestrict(objMessage.strSenderChannelId, objMessage.strChatChannelId),
-                f"{strNick} 님을 임시 제한했어요"))
+                f"{strNick} 님을 임시 제한했어요", (objMessage, "임시 제한", "")))
             actTempRelease.triggered.connect(lambda: self._RunModeration(
                 lambda objClient: objClient.ReleaseTemporaryRestrict(objMessage.strSenderChannelId, objMessage.strChatChannelId),
-                f"{strNick} 님의 임시 제한을 풀었어요"))
+                f"{strNick} 님의 임시 제한을 풀었어요", (objMessage, "임시 제한 풀기", "")))
             actBlind.triggered.connect(lambda: self._RunModeration(
                 lambda objClient: objClient.BlindChatMessage(objMessage.strChatChannelId, objMessage.nMessageTime,
                                                              objMessage.strSenderChannelId),
-                f"{strNick} 님의 메시지를 가렸어요"))
+                f"{strNick} 님의 메시지를 가렸어요", (objMessage, "메시지 가리기", objMessage.strPlainContent)))
             actRestrict.triggered.connect(lambda: self._ConfirmRestrict(objMessage))
 
         objMenu.addSeparator()
-        objMenu.addAction("닉네임 복사").triggered.connect(lambda: QApplication.clipboard().setText(strNick))
+        strContent = objMessage.strPlainContent
+        objMenu.addAction("채팅 내용 복사").triggered.connect(lambda: self._CopyText(strContent, objGlobalPos))
+        objMenu.addAction("닉네임 + 채팅 복사").triggered.connect(
+            lambda: self._CopyText(f"{strNick}: {strContent}", objGlobalPos))
+        objMenu.addAction("닉네임 복사").triggered.connect(lambda: self._CopyText(strNick, objGlobalPos))
         objMenu.exec(objGlobalPos)
+
+    def _CopyText(self, strText: str, objGlobalPos: Optional[QPoint] = None, strDone: str = "복사했어요") -> None:
+        """클립보드에 복사하고, 마우스 옆에 잠깐 알려줘요."""
+        QApplication.clipboard().setText(strText)
+        QToolTip.showText(objGlobalPos or QCursor.pos(), strDone, self)
+
+    def OnCopyClicked(self) -> None:
+        """[복사]: 채팅창에서 드래그해서 고른 글자가 있으면 그것만, 없으면 지금 보이는 채팅 전체를 복사해요."""
+        objCursor = self.txtChat.textCursor()
+        bSelected = objCursor.hasSelection()
+        strText = objCursor.selectedText() if bSelected else self.txtChat.toPlainText()
+        # 줄바꿈 글자(문단 구분 U+2029)와 글자 사이 빈칸(&nbsp;)을 보통 글자로 바꿔요.
+        strText = strText.replace("\u2029", "\n").replace("\u2028", "\n").replace("\xa0", " ").strip()
+        if not strText:
+            QToolTip.showText(QCursor.pos(), "복사할 채팅이 없어요", self)
+            return
+        nLines = len(strText.splitlines())
+        self._CopyText(strText, strDone=f"{'고른 글자' if bSelected else '채팅 전체'} {nLines}줄을 복사했어요")
 
     def _ConfirmRestrict(self, objMessage: ChzzkChatMessage) -> None:
         strNick = objMessage.strNickname
@@ -523,10 +596,13 @@ class ChatWindow(QWidget):
         if QMessageBox.question(self, "활동 제한", strQuestion) != QMessageBox.StandardButton.Yes:
             return
         self._RunModeration(lambda objClient: objClient.AddRestriction(objMessage.strSenderChannelId),
-                            f"{strNick} 님을 활동 제한했어요")
+                            f"{strNick} 님을 활동 제한했어요", (objMessage, "활동 제한", ""))
 
-    def _RunModeration(self, fnAction: Callable, strDoneText: str) -> None:
-        """제한 · 가리기 요청을 뒤에서 보내고, 결과를 채팅창과 메인 로그에 남겨요."""
+    def _RunModeration(self, fnAction: Callable, strDoneText: str, tupleRecord: Optional[tuple] = None) -> None:
+        """제한 · 가리기 요청을 뒤에서 보내고, 결과를 채팅창과 메인 로그에 남겨요.
+
+        tupleRecord: (채팅, 한 일 이름, 내용) — 성공하면 '이 프로그램으로 한 제한 기록' 에 남겨요.
+        """
         objClient = self.fnGetClient()
         if objClient is None or not objClient.bIsLoggedIn:
             self._OnStatus("error", "치지직 로그인이 필요해요.")
@@ -540,12 +616,17 @@ class ChatWindow(QWidget):
                 return
             self._AppendSystem(strDoneText)
             self.fnLog(f"[제한] {strDoneText}")
+            if tupleRecord:
+                objTarget, strAction, strDetail = tupleRecord
+                self.objHistory.Add(objTarget.strSenderChannelId, objTarget.strNickname, strAction, strDetail)
 
         RunTask(self.listSendWorkers, lambda: fnAction(objClient), _Done)
 
     def OnRestrictListClicked(self) -> None:
         if self.objRestrictDialog is None:
-            self.objRestrictDialog = RestrictDialog(self.fnGetClient, fnLog=self.fnLog, objParent=self)
+            self.objRestrictDialog = RestrictDialog(
+                self.fnGetClient, fnLog=self.fnLog, objParent=self,
+                fnRecord=lambda strChannelId, strNickname, strAction: self.objHistory.Add(strChannelId, strNickname, strAction))
         else:
             self.objRestrictDialog.Reload()
         self.objRestrictDialog.show()

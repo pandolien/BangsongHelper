@@ -30,7 +30,7 @@ from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGroupBox,
     QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
+    QSplitter, QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -60,6 +60,8 @@ import app_log
 from app_paths import B_TEST_MODE, STR_APP_DIR, STR_CONFIG_NAME
 from gui.alarm import DonationAlarm
 from gui.alarm_dialog import AlarmSettingsDialog
+from gui.remote_panel import RemotePanel
+import whats_new
 from gui.theme import BuildPalette, BuildStyleSheet, ThemeColors, ThemeDialog
 
 # URL 설정에 보여줄 '사람이 읽는 이름'. (init.json 의 칸 이름 → 화면 글자)
@@ -88,6 +90,7 @@ DICT_URL_LABELS = {
         "session_subscribe_chat": "채팅 이벤트 구독 경로",
         "session_subscribe_donation": "후원 이벤트 구독 경로",
         "session_subscribe_subscription": "구독 이벤트 구독 경로",
+        "subscribers": "채널 구독자 조회 경로",
         "chat_blind": "채팅 메시지 가리기 경로",
         "temporary_restrict": "임시 제한 경로",
         "restrict": "활동 제한 경로",
@@ -154,7 +157,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(STR_APP_TITLE)
-        self.resize(1280, 820)
+        self.resize(1480, 820)  # 오른쪽에 치지직 리모컨이 들어가서 넓게 시작해요.
 
         self.objThreadPool = QThreadPool.globalInstance()
         # 아래쪽에 '무슨 일이 있었는지' 기록하는 일기장
@@ -189,6 +192,7 @@ class MainWindow(QMainWindow):
         self.objChatHub = ChatHub(fnGetClient=lambda: self.objChzzkClient)
         # 후원 목록 창은 미리 만들어 둬요. (창이 닫혀 있어도 연결만 돼 있으면 후원을 받아 둬요)
         self.objDonationWindow = DonationWindow(self.objChatHub, fnLog=self.Log)
+        self.objDonationWindow.fnGetChannelId = lambda: self.dictConfig["chzzk"].get("channel_id", "")
         # '후원 받기 자동 시작' 으로 연결을 붙잡고 있는지 (창처럼 공유기에 이름을 올려 둬요)
         self.bAutoDonationJoined = False
         # 미션 창도 미리 만들어 둬요. (창이 닫혀 있어도 미션 후원을 받아서 등록해요)
@@ -249,8 +253,21 @@ class MainWindow(QMainWindow):
         objLayout.setContentsMargins(0, 0, 0, 0)
         objLayout.setSpacing(0)
         objLayout.addWidget(objHeader)
-        objLayout.addWidget(self.objStreamWindow, 1)
+        # 가운데: [채팅 (· 후원 · 미션)] | [치지직 리모컨] (경계선을 끌어서 폭 조절)
+        self.objRemotePanel = RemotePanel(lambda: self.dictConfig["chzzk"].get("channel_id", ""))
+        self.objRemotePanel.sigHideRequested.connect(lambda: self._SetRemotePanel(False))
+        self.objBodySplitter = QSplitter(Qt.Orientation.Horizontal)
+        self.objBodySplitter.setChildrenCollapsible(False)
+        self.objBodySplitter.addWidget(self.objStreamWindow)
+        self.objBodySplitter.addWidget(self.objRemotePanel)
+        self.objBodySplitter.setStretchFactor(0, 3)
+        self.objBodySplitter.setStretchFactor(1, 2)
+        self.objBodySplitter.setSizes([860, 560])
+        objLayout.addWidget(self.objBodySplitter, 1)
         self.setCentralWidget(objCentral)
+        self.bRemoteVisible = bool(self.dictConfig["app"].get("show_remote_panel", True))
+        self.objRemotePanel.setVisible(self.bRemoteVisible)
+        self.objStreamWindow.SetToolsVisible(bool(self.dictConfig["app"].get("show_donation_mission", False)))
 
         # 맨 아래 상태줄: 마지막 로그 한 줄 (전체는 [보기] → 로그)
         self.lblStatusLog = QLabel("")
@@ -273,7 +290,9 @@ class MainWindow(QMainWindow):
         if self._HasRequiredSettings():
             self.OnRefreshClicked()
         # 창이 뜬 다음에 물어봐요. (설정이 비어 있을 때만)
-        QTimer.singleShot(0, self._CheckOldConfig)
+        QTimer.singleShot(0, self._OnFirstShown)
+        if self.bRemoteVisible:
+            QTimer.singleShot(0, self.objRemotePanel.EnsureLoaded)  # 창이 먼저 뜨고, 웹 화면은 그다음에
 
     # ===================================================================
     # 화면 만들기
@@ -348,6 +367,16 @@ class MainWindow(QMainWindow):
         objView.addAction("방송 상태 (치지직 · 스팀)...", lambda: self._OpenWindow(self.dlgStatus))
         objView.addAction("게임 짝...", lambda: self._OpenWindow(self.dlgGameMap))
         objView.addAction("로그...", lambda: self._OpenWindow(self.dlgLog))
+        objView.addSeparator()
+        self.actRemote = objView.addAction("치지직 리모컨 (오른쪽)")
+        self.actRemote.setCheckable(True)
+        self.actRemote.setChecked(bool(self.dictConfig["app"].get("show_remote_panel", True)))
+        self.actRemote.toggled.connect(self._SetRemotePanel)
+        self.actTools = objView.addAction("후원 목록 · 미션 화면 보이기")
+        self.actTools.setCheckable(True)
+        self.actTools.setChecked(bool(self.dictConfig["app"].get("show_donation_mission", False)))
+        self.actTools.toggled.connect(self._SetToolsVisible)
+        objView.addAction("업데이트 안내 보기...", self._ShowWhatsNew)
 
         objSettings = objMenuBar.addMenu("설정(&S)")
         objSettings.addAction("키 · ID · 서버 주소...", self.OnOpenSettingsClicked)
@@ -1001,6 +1030,48 @@ class MainWindow(QMainWindow):
                 self.objAlarm.Play("subscription")
         elif self.objDonationWindow.chkSound.isChecked():
             self.objAlarm.Play("donation")
+
+    def _SaveAppOption(self, strKey: str, value) -> None:
+        self.dictConfig["app"][strKey] = value
+        try:
+            SaveConfig(self.dictConfig)
+        except OSError as objError:
+            self.Log(f"[경고] 설정 저장 실패: {objError}")
+
+    def _SetRemotePanel(self, bVisible: bool) -> None:
+        """오른쪽 치지직 리모컨 패널을 보이거나 숨겨요. (선택은 저장돼요)"""
+        self.bRemoteVisible = bVisible
+        if self.actRemote.isChecked() != bVisible:
+            self.actRemote.setChecked(bVisible)  # 패널의 [✕] 로 닫았을 때 메뉴 체크도 맞춰요.
+            return  # (체크가 바뀌면서 이 함수가 한 번 더 불려요)
+        self.objRemotePanel.setVisible(bVisible)
+        if bVisible:
+            self.objRemotePanel.EnsureLoaded()
+        self._SaveAppOption("show_remote_panel", bVisible)
+
+    def _SetToolsVisible(self, bVisible: bool) -> None:
+        """후원 목록 · 미션 화면을 보이거나 숨겨요. (숨겨도 후원 받기 · 알림 · 타이머는 계속돼요)"""
+        self.objStreamWindow.SetToolsVisible(bVisible)
+        self._SaveAppOption("show_donation_mission", bVisible)
+
+    def _OnFirstShown(self) -> None:
+        """창이 뜬 다음: 새 버전 안내 → 이전 설정 가져오기 확인."""
+        self._CheckWhatsNew()
+        self._CheckOldConfig()
+
+    def _ShowWhatsNew(self) -> None:
+        objBox = QMessageBox(self)
+        objBox.setWindowTitle("업데이트 안내")
+        objBox.setTextFormat(Qt.TextFormat.RichText)
+        objBox.setText(whats_new.BuildHtml())
+        objBox.exec()
+
+    def _CheckWhatsNew(self) -> None:
+        """새 버전으로 처음 켰을 때 바뀐 점을 한 번만 보여줘요. (시험용 설정으로 켰을 때는 건너뛰어요)"""
+        if B_TEST_MODE or self.dictConfig["app"].get("last_seen_version", "") == whats_new.STR_VERSION:
+            return
+        self._ShowWhatsNew()
+        self._SaveAppOption("last_seen_version", whats_new.STR_VERSION)
 
     def OnAlarmSettingsClicked(self) -> None:
         """[설정] → 알림 소리...: 후원 · 구독 소리의 크기 · 음 높이"""
@@ -1823,6 +1894,8 @@ class MainWindow(QMainWindow):
         if self.chkAutoRefresh.isChecked():
             self.objRefreshTimer.start(self.spinInterval.value() * 1000)
         self.Log("설정 저장 완료")
+        if self.bRemoteVisible:
+            self.objRemotePanel.EnsureLoaded()  # 채널 ID 를 새로 넣었거나 바꿨다면 리모컨을 새로 불러와요.
         if self._HasRequiredSettings():
             self.OnRefreshClicked()
 
@@ -1892,6 +1965,7 @@ class MainWindow(QMainWindow):
         self.objYouTubeHub.Disconnect()
         self.objStreamWindow.close()
         self.objChatHub.Disconnect()
+        self.objRemotePanel.Shutdown()
         app_log.Write("=== 프로그램 종료 ===")
         super().closeEvent(objEvent)
 

@@ -19,3 +19,5 @@ Log/
 data/init_test.json
 data/*_test.*
 data/*.bak
+data/moderation_history.json
+data/moderation_history.json.tmp

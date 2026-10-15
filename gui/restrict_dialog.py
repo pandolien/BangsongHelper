@@ -38,12 +38,15 @@ def _ShortDate(strValue: Optional[str]) -> str:
 
 class RestrictDialog(QDialog):
     def __init__(self, fnGetClient: Callable[[], Optional[ChzzkApiClient]],
-                 fnLog: Optional[Callable[[str], None]] = None, objParent: Optional[QWidget] = None):
+                 fnLog: Optional[Callable[[str], None]] = None, objParent: Optional[QWidget] = None,
+                 fnRecord: Optional[Callable[[str, str, str], None]] = None):
         super().__init__(objParent)
         self.setWindowTitle("활동 제한 목록")
         self.resize(520, 420)
         self.fnGetClient = fnGetClient
         self.fnLog = fnLog or (lambda strMessage: None)
+        # 풀어 준 시청자를 기록하는 함수 (채널 ID, 닉네임, 한 일). 화면 스레드에서 불러요.
+        self.fnRecord = fnRecord or (lambda strChannelId, strNickname, strAction: None)
         self.listTasks = []
         self.listRows: List[dict] = []
 
@@ -122,21 +125,26 @@ class RestrictDialog(QDialog):
         self.btnRelease.setEnabled(False)
 
         def _ReleaseAll():
-            listFailed = []
+            listFailed, listDone = [], []
             for dictItem in listTargets:
                 try:
                     objClient.RemoveRestriction(dictItem["restrictedChannelId"])
+                    listDone.append(dictItem)
                 except ChzzkApiError as objError:
                     listFailed.append((dictItem.get("restrictedChannelName") or "?", objError))
-            return listFailed
+            return listFailed, listDone
 
         def _Done(objResult):
             self.btnRelease.setEnabled(True)
             if isinstance(objResult, Exception):
                 QMessageBox.warning(self, "오류", ExplainRestrictError(objResult))
-            elif objResult:
-                QMessageBox.warning(self, "일부 실패", "\n".join(f"{strName}: {ExplainRestrictError(objError)}"
-                                                              for strName, objError in objResult))
+            else:
+                listFailed, listDone = objResult
+                for dictItem in listDone:
+                    self.fnRecord(dictItem["restrictedChannelId"], dictItem.get("restrictedChannelName") or "", "활동 제한 풀기")
+                if listFailed:
+                    QMessageBox.warning(self, "일부 실패", "\n".join(f"{strName}: {ExplainRestrictError(objError)}"
+                                                                  for strName, objError in listFailed))
             self.fnLog(f"[제한] 활동 제한 풀기: {strNames}")
             self.Reload()
 
