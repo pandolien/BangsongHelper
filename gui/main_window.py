@@ -56,12 +56,15 @@ from config_manager import (
 from steam import DICT_DEFAULT_STEAM_URLS, SteamApiClient, SteamApiError, SteamPlayerStatus
 from youtube import DICT_DEFAULT_YOUTUBE_URLS
 from gui.youtube_hub import YouTubeHub
+from datetime import datetime
 import app_log
 from app_paths import B_TEST_MODE, STR_APP_DIR, STR_CONFIG_NAME
 from gui.alarm import DonationAlarm
 from gui.alarm_dialog import AlarmSettingsDialog
+from gui.donation_window import RemoteControlUrl
 from gui.remote_panel import RemotePanel
 import whats_new
+from obs_overlay import N_DEFAULT_PORT, IsAllowedAlertUrl, OverlayServer
 from gui.theme import BuildPalette, BuildStyleSheet, ThemeColors, ThemeDialog
 
 # URL 설정에 보여줄 '사람이 읽는 이름'. (init.json 의 칸 이름 → 화면 글자)
@@ -153,6 +156,7 @@ class Worker(QRunnable):
 class MainWindow(QMainWindow):
     # 토큰 갱신은 일꾼 스레드에서 일어나요. 화면 갱신은 반드시 메인 스레드에서 해야 해서 신호로 넘겨요.
     sigTokenChanged = Signal()
+    sigOverlayTitle = Signal(str)  # OBS 독 제목칸에서 온 방송 제목 (다른 스레드에서 와도 화면 스레드에서 처리돼요)
 
     def __init__(self):
         super().__init__()
@@ -192,6 +196,9 @@ class MainWindow(QMainWindow):
         self.objChatHub = ChatHub(fnGetClient=lambda: self.objChzzkClient)
         # 후원 목록 창은 미리 만들어 둬요. (창이 닫혀 있어도 연결만 돼 있으면 후원을 받아 둬요)
         self.objDonationWindow = DonationWindow(self.objChatHub, fnLog=self.Log)
+        self.objOverlay = OverlayServer()
+        strAlertUrl = str(self.dictConfig["app"].get("obs_alert_url", "") or "").strip()
+        self.objOverlay.strAlertUrl = strAlertUrl if IsAllowedAlertUrl(strAlertUrl) else ""
         self.objDonationWindow.fnGetChannelId = lambda: self.dictConfig["chzzk"].get("channel_id", "")
         # '후원 받기 자동 시작' 으로 연결을 붙잡고 있는지 (창처럼 공유기에 이름을 올려 둬요)
         self.bAutoDonationJoined = False
@@ -268,6 +275,11 @@ class MainWindow(QMainWindow):
         self.bRemoteVisible = bool(self.dictConfig["app"].get("show_remote_panel", True))
         self.objRemotePanel.setVisible(self.bRemoteVisible)
         self.objStreamWindow.SetToolsVisible(bool(self.dictConfig["app"].get("show_donation_mission", False)))
+        # OBS 채팅 화면: 채팅 · 후원이 오면 같이 내보내요. (꺼져 있으면 아무 일도 안 해요)
+        self.objChatWindow.fnOverlay = self.objOverlay.Publish
+        self.objOverlay.fnSend = self.objChatWindow.sigOverlaySend.emit  # OBS 독 입력칸 → 채팅 보내기
+        self.objOverlay.fnSetTitle = self.sigOverlayTitle.emit            # OBS 독 제목칸 → 방송 제목 바꾸기
+        self.sigOverlayTitle.connect(self._OnOverlayTitle)
 
         # 맨 아래 상태줄: 마지막 로그 한 줄 (전체는 [보기] → 로그)
         self.lblStatusLog = QLabel("")
@@ -376,6 +388,15 @@ class MainWindow(QMainWindow):
         self.actTools.setCheckable(True)
         self.actTools.setChecked(bool(self.dictConfig["app"].get("show_donation_mission", False)))
         self.actTools.toggled.connect(self._SetToolsVisible)
+        objView.addSeparator()
+        self.actObs = objView.addAction("OBS 채팅 화면 켜기")
+        self.actObs.setCheckable(True)
+        self.actObs.setChecked(bool(self.dictConfig["app"].get("obs_overlay", False)))
+        self.actObs.toggled.connect(self._SetObsOverlay)
+        objView.addAction("OBS 독 주소 복사 (채팅 · 제목 입력 + 방송 상태)", lambda: self._CopyObsUrl(bDock=True))
+        objView.addAction("OBS 방송 화면용 채팅 주소 복사 (보기 전용)", lambda: self._CopyObsUrl(bDock=False))
+        objView.addAction("OBS 영상 후원 알림 주소 설정...", self._SetObsAlertUrl)
+        objView.addAction("OBS 리모컨(영상 후원) 주소 복사", self._CopyObsRemoteUrl)
         objView.addAction("업데이트 안내 보기...", self._ShowWhatsNew)
 
         objSettings = objMenuBar.addMenu("설정(&S)")
@@ -1054,8 +1075,130 @@ class MainWindow(QMainWindow):
         self.objStreamWindow.SetToolsVisible(bVisible)
         self._SaveAppOption("show_donation_mission", bVisible)
 
+    def _PublishObsStatus(self, objLive=None) -> None:
+        """OBS 독 상단에 보여줄 방송 상태를 알려요. (방송 중 · 시청자 · 제목 · 카테고리 · 현재 게임)"""
+        if objLive is not None:
+            self.objLastLive = objLive
+        objLive = getattr(self, "objLastLive", None)
+        if objLive is None:
+            return
+        objGame = getattr(self, "objCurrentGame", None)
+        objClient = getattr(self, "objChzzkClient", None)
+        self.objOverlay.SetStatus({
+            "live": bool(objLive.bIsLive), "viewers": int(objLive.nConcurrentUserCount or 0),
+            "title": objLive.strLiveTitle or "", "channel": objLive.strChannelName or "",
+            "category": objLive.strLiveCategoryValue or objLive.strLiveCategory or "",
+            "game": objGame.strGameName if objGame else "",
+            "loggedIn": bool(objClient is not None and objClient.bIsLoggedIn),
+            "at": datetime.now().strftime("%H:%M:%S")})
+
+    def _OnOverlayTitle(self, strTitle: str) -> None:
+        """OBS 독 제목칸에서 온 방송 제목 바꾸기. (결과는 프로그램 로그와 OBS 화면 안내로 알려요)"""
+        objClient = getattr(self, "objChzzkClient", None)
+        if objClient is None or not objClient.bIsLoggedIn:
+            self.objChatWindow._SendOverlay({"type": "system", "text": "치지직 로그인이 필요해요"})
+            self.Log("[경고] OBS 제목 바꾸기: 치지직 로그인이 필요해요.")
+            return
+        self.Log("OBS 제목칸에서 방송 제목 바꾸기 요청")
+
+        def _Done(objSetting):
+            self.editTitle.setText(objSetting.strDefaultLiveTitle)
+            self.editTitle.setModified(False)
+            self._ShowLiveSetting(objSetting)
+            self.Log(f"제목 변경: {objSetting.strDefaultLiveTitle}")
+            objLast = getattr(self, "objLastLive", None)
+            if objLast is not None:
+                objLast.strLiveTitle = objSetting.strDefaultLiveTitle
+                self.lblHeaderTitle.setText(objSetting.strDefaultLiveTitle or "방송 제목 -")
+                self._PublishObsStatus()
+            self.objChatWindow._SendOverlay({"type": "system", "text": "방송 제목을 바꿨어요"})
+
+        def _Fail(objError):
+            self.Log(f"[경고] OBS 제목 바꾸기 실패: {objError}")
+            self.objChatWindow._SendOverlay({"type": "system", "text": f"제목 바꾸기 실패: {objError}"})
+
+        self.RunInBackground(lambda: objClient.UpdateLiveSetting(strDefaultLiveTitle=strTitle), _Done, _Fail)
+
+    def _ObsPort(self) -> int:
+        try:
+            return int(self.dictConfig["app"].get("obs_overlay_port", N_DEFAULT_PORT))
+        except (TypeError, ValueError):
+            return N_DEFAULT_PORT
+
+    def _SetObsOverlay(self, bOn: bool, bSave: bool = True) -> None:
+        """OBS 채팅 화면(내 컴퓨터 안에서만 열리는 주소)을 켜거나 꺼요."""
+        if bOn:
+            bOk, strMessage = self.objOverlay.Start(self._ObsPort())
+            if not bOk:
+                self.Log(f"[경고] OBS 채팅 화면을 켤 수 없어요: {strMessage}")
+                self.actObs.blockSignals(True)
+                self.actObs.setChecked(False)
+                self.actObs.blockSignals(False)
+                QMessageBox.warning(self, "OBS 채팅 화면", f"켤 수 없어요.\n\n{strMessage}")
+                return
+            self.Log(f"OBS 채팅 화면을 켰어요: {strMessage}  (OBS 브라우저 소스 · 독에 붙여넣으세요)")
+        else:
+            self.objOverlay.Stop()
+            self.Log("OBS 채팅 화면을 껐어요.")
+        if bSave:
+            self._SaveAppOption("obs_overlay", bOn)
+
+    def _CopyObsUrl(self, bDock: bool = False) -> None:
+        """OBS 주소 복사. bDock=True 면 독용(/dock: 방송 상태 + 제목 · 채팅 입력칸), 아니면 방송 화면용(/chat: 보기 전용)."""
+        if not self.objOverlay.bIsRunning:
+            QMessageBox.information(self, "OBS 주소", "먼저 [보기] → OBS 채팅 화면 켜기 를 체크해 주세요.")
+            return
+        strUrl = self.objOverlay.DockUrl() if bDock else self.objOverlay.Url()
+        QApplication.clipboard().setText(strUrl)
+        if bDock:
+            strGuide = ("OBS 메뉴 [독] → 사용자 지정 브라우저 독 → 이름 정하고 주소 붙여넣기\n\n"
+                        "패널에 이렇게 나와요:\n"
+                        "· 맨 위: 방송 상태 (방송 중 · 시청자 · 카테고리 · 제목 · 게임)\n"
+                        "· 가운데: 채팅\n"
+                        "· 아래: 제목 입력칸 + 채팅 입력칸\n"
+                        "(치지직 로그인이 되어 있어야 제목 · 채팅을 보낼 수 있어요. 스트리머만 보는 화면이에요)")
+        else:
+            strGuide = ("OBS 소스 [+] → 브라우저 → 주소 붙여넣기 (방송 화면에 채팅이 나가요, 보기 전용)\n\n"
+                        "옵션 예: 주소 뒤에 ?theme=light&size=24&lines=20  (자세한 건 README)")
+        QMessageBox.information(self, "OBS 주소", f"주소를 복사했어요:\n{strUrl}\n\n{strGuide}")
+
+    def _SetObsAlertUrl(self) -> None:
+        """치지직 스튜디오의 '알림 주소'를 넣어 두면 OBS 채팅 화면 위쪽에 영상 후원 알림 화면이 같이 나와요."""
+        strNow = self.objOverlay.strAlertUrl
+        strText, bOk = QInputDialog.getText(
+            self, "OBS 영상 후원 알림 주소",
+            "치지직 스튜디오의 '알림 주소'(OBS 브라우저 소스에 넣는 방송용 주소)를 붙여넣어 주세요.\n"
+            "· 같은 OBS 채팅 화면 위쪽에 영상 후원 알림이 같이 나와요.\n"
+            "· 이 주소에는 내 채널 비밀 값이 들어 있어요. 남에게 보여주지 마세요.\n"
+            "· 지우려면 비우고 [확인]. 네이버(https) 주소만 받아요.",
+            QLineEdit.EchoMode.Password, strNow)
+        if not bOk:
+            return
+        strText = strText.strip()
+        if strText and not IsAllowedAlertUrl(strText):
+            QMessageBox.warning(self, "OBS 영상 후원 알림 주소",
+                                "이 주소는 쓸 수 없어요. 네이버(https://...naver.com/...) 주소만 받아요.")
+            return
+        self.objOverlay.strAlertUrl = strText
+        self._SaveAppOption("obs_alert_url", strText)
+        self.Log("OBS 영상 후원 알림 주소를 " + ("저장했어요. (OBS 채팅 화면을 새로고침하면 보여요)" if strText else "지웠어요."))
+
+    def _CopyObsRemoteUrl(self) -> None:
+        """영상 후원 재생 · 건너뛰기를 하는 치지직 리모컨 주소를 복사해요. (OBS 독에 붙여서 쓰기)"""
+        strUrl = RemoteControlUrl(self.dictConfig["chzzk"].get("channel_id", ""))
+        QApplication.clipboard().setText(strUrl)
+        QMessageBox.information(
+            self, "OBS 리모컨 주소",
+            f"주소를 복사했어요:\n{strUrl}\n\n"
+            "OBS [독] → 사용자 지정 브라우저 독 → 이름 정하고 주소 붙여넣기\n"
+            "처음 한 번 네이버 로그인을 하면 OBS 안에 로그인이 저장돼요.\n"
+            "영상 후원 재생 · 건너뛰기는 이 화면에서 직접 눌러요.\n"
+            "(영상 자체는 치지직이 주는 방송용 알림 주소를 OBS 브라우저 소스로 쓰는 거예요)")
+
     def _OnFirstShown(self) -> None:
         """창이 뜬 다음: 새 버전 안내 → 이전 설정 가져오기 확인."""
+        if self.actObs.isChecked():
+            self._SetObsOverlay(True, bSave=False)  # 지난번에 켜 두었으면 다시 켜요.
         self._CheckWhatsNew()
         self._CheckOldConfig()
 
@@ -1199,6 +1342,7 @@ class MainWindow(QMainWindow):
                                               self.listLastFolderGames if self.chkFolderGames.isChecked() else [])
         objGame = self.objCurrentGame
         self._SetChip(self.lblChipGame, f"게임: {objGame.strGameName}" if objGame else "게임 없음")
+        self._PublishObsStatus()
         if objGame is None:
             self.lblCurrentGame.setText("없음 (스팀 게임도, 짝이 있거나 잘 알려진 게임 프로그램도 안 보여요)")
         else:
@@ -1264,6 +1408,7 @@ class MainWindow(QMainWindow):
         self.lblChzzkCategory.setText(objLive.strLiveCategoryValue or objLive.strLiveCategory or "-")
         self.lblChzzkViewers.setText(f"{objLive.nConcurrentUserCount:,} 명" if objLive.bIsLive else "-")
         self.Log(f"[치지직] {'방송 중' if objLive.bIsLive else '방송 꺼짐'} / 출처: {objLive.strSource}")
+        self._PublishObsStatus(objLive)
 
     def OnAutoRefreshToggled(self, bChecked: bool) -> None:
         if bChecked:
@@ -1966,6 +2111,7 @@ class MainWindow(QMainWindow):
         self.objStreamWindow.close()
         self.objChatHub.Disconnect()
         self.objRemotePanel.Shutdown()
+        self.objOverlay.Stop()
         app_log.Write("=== 프로그램 종료 ===")
         super().closeEvent(objEvent)
 

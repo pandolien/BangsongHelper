@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 data/init.json
 data/init.json.tmp
+data/init.backup.json
 data/donations.json
 data/donations.json.tmp
 data/missions.json

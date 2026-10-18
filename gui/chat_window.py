@@ -27,7 +27,7 @@ from typing import Callable, Optional
 # [중요] socketio 는 반드시 PySide6 보다 "먼저" 불러와야 해요.
 # (PySide6 를 먼저 부르면 socketio 가 쓰는 six 라이브러리와 충돌해서 프로그램이 꺼져요)
 import socketio  # noqa: F401  (순서 맞추기용)
-from PySide6.QtCore import QPoint, Qt, QUrl
+from PySide6.QtCore import QPoint, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSpinBox,
@@ -39,7 +39,7 @@ from chzzk import (
 )
 from gui.bg_task import RunTask
 from gui.chat_hub import ChatHub
-from gui.emoji_cache import EmojiCache, N_HEIGHT as N_EMOJI_HEIGHT
+from gui.emoji_cache import EmojiCache, IsAllowedImageUrl, N_HEIGHT as N_EMOJI_HEIGHT
 from gui.restrict_dialog import ExplainRestrictError, RestrictDialog
 from gui.viewer_info_dialog import ViewerInfoDialog
 from moderation_history import ModerationHistory
@@ -55,6 +55,7 @@ STR_MSG_LINK_PREFIX = "msg:"  # 채팅 줄 링크 모양: msg:번호
 # (색상 설정을 바꾸면 이미 보이는 채팅도 새 색으로 다시 그릴 수 있게)
 STR_TEXT_COLOR_TOKEN = "@@TEXT@@"                  # 채팅 글자색
 RE_NICK_COLOR_TOKEN = re.compile(r"@@NICK(#[0-9a-fA-F]{6})@@")  # 닉네임 색 (어두운 배경이면 밝게)
+STR_ROW_BG_TOKENS = ("@@ROWBG0@@", "@@ROWBG1@@")    # 채팅 줄 배경 (한 줄씩 번갈아 아주 연하게)
 STR_DONATION_TEXT = "#1f2937"                      # 노란 후원 줄 안의 글자는 배경이 늘 밝아서 진하게 고정
 
 # 닉네임 색깔표 (흰 바탕에서 잘 읽히는 색들). 같은 사람은 항상 같은 색이 나와요.
@@ -86,6 +87,8 @@ class ChatWindow(QWidget):
     objHub      : 실시간 채팅 연결 공유기 (후원 목록 창과 같은 연결을 써요)
     fnLog       : 메인 창 로그에 남길 함수 (없어도 됨)
     """
+
+    sigOverlaySend = Signal(str)  # OBS 독 입력칸에서 온 채팅 (다른 스레드에서 와도 화면 스레드에서 처리돼요)
 
     def __init__(self, objHub: ChatHub,
                  fnLog: Optional[Callable[[str], None]] = None, objParent: Optional[QWidget] = None,
@@ -207,7 +210,11 @@ class ChatWindow(QWidget):
         self.objHistory = ModerationHistory()  # 이 프로그램으로 한 제한 기록 (파일에 저장돼요)
         self.objViewerInfo = None
         self.strTextColor = "#1f2937"
+        self.strBackgroundColor = "#ffffff"
         self.bDarkBackground = False
+        self.nRowTick = 0  # 채팅 줄 배경을 번갈아 칠하려고 세는 숫자
+        self.fnOverlay: Callable[[dict], None] = lambda dictEvent: None  # OBS 채팅 화면으로 보내는 곳 (메인 창이 연결)
+        self.sigOverlaySend.connect(self.SendFromOverlay)
         self.txtChat.setToolTip("닉네임을 누르거나 채팅을 우클릭하면 임시 제한 · 가리기 메뉴가 떠요.")
         # 닉네임(링크)을 누르면 → 시청자 메뉴
         self.txtChat.anchorClicked.connect(self._OnChatLinkClicked)
@@ -279,7 +286,7 @@ class ChatWindow(QWidget):
     def _TimeHtml(self, objTime) -> str:
         if not self.chkShowTime.isChecked():
             return ""
-        return f"<span style='color:#9ca3af'>{objTime.strftime('%H:%M')}</span> "
+        return f"<span style='color:#9ca3af; font-size:9pt'>{objTime.strftime('%H:%M')}</span>&nbsp; "
 
     def _OnEmojiReady(self, strUrl: str, objImage) -> None:
         """이모티콘 그림을 다 받았어요 → 채팅창 문서에 올려 둬요. (이후 채팅부터 그림으로 나와요)"""
@@ -305,6 +312,44 @@ class ChatWindow(QWidget):
         return "".join(listParts)
 
     @staticmethod
+    def _OverlayParts(strContent: str, dictEmojis: Optional[dict]) -> list:
+        """OBS 화면용 내용: [["t", 글자], ["e", 그림 주소, 이름], ...] (허용된 주소의 그림만 그림으로)"""
+        dictEmojis = dictEmojis or {}
+        strContent = strContent or ""
+        listParts = []
+        nLast = 0
+        for objMatch in RE_EMOJI_PLACEHOLDER.finditer(strContent):
+            if objMatch.start() > nLast:
+                listParts.append(["t", strContent[nLast:objMatch.start()]])
+            strUrl = dictEmojis.get(objMatch.group(1))
+            if isinstance(strUrl, str) and IsAllowedImageUrl(strUrl):
+                listParts.append(["e", strUrl, objMatch.group(1)])
+            else:
+                listParts.append(["t", f"[{objMatch.group(1)}]"])
+            nLast = objMatch.end()
+        if nLast < len(strContent):
+            listParts.append(["t", strContent[nLast:]])
+        return listParts
+
+    def _SendOverlay(self, dictEvent: dict) -> None:
+        try:
+            self.fnOverlay(dictEvent)
+        except Exception:  # OBS 화면에 문제가 있어도 채팅창은 계속 돼요.
+            pass
+
+    def _OverlayNickColor(self, strKey: str) -> str:
+        """OBS 화면은 어두운 바탕 위에 올라가는 일이 많아서 닉네임 색을 밝게 보내요."""
+        return QColor(self._NickColor(strKey)).lighter(150).name()
+
+    def _Row(self, strInner: str, strBarColor: str) -> str:
+        """채팅 한 줄: 왼쪽에 색 띠(닉네임 색) + 연한 바탕을 번갈아 칠한 칸. 줄 사이가 또렷하게 보여요."""
+        self.nRowTick += 1
+        strBg = STR_ROW_BG_TOKENS[self.nRowTick % 2]
+        return (f"<table width='100%' cellspacing='0' cellpadding='0' style='background:{strBg}'><tr>"
+                f"<td width='4' bgcolor='{strBarColor}'></td>"
+                f"<td style='padding:5px 8px 5px 8px'>{strInner}</td></tr></table>")
+
+    @staticmethod
     def _NickColor(strKey: str) -> str:
         return LIST_NICK_COLORS[zlib.crc32(strKey.encode("utf-8")) % len(LIST_NICK_COLORS)]
 
@@ -316,13 +361,18 @@ class ChatWindow(QWidget):
         strNickColor = self._NickColor(objMessage.strSenderChannelId or objMessage.strNickname)
         # 닉네임과 내용을 링크로 감싸요 → 누르거나 우클릭하면 이 채팅으로 시청자 메뉴가 떠요.
         strLink = f"{STR_MSG_LINK_PREFIX}{self._RememberMessage(objMessage)}"
-        strHtml = (f"{self._TimeHtml(objMessage.dtTime)}{strRole}"
-                   f"<a href='{strLink}' style='text-decoration:none'>"
-                   f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b></a>"
-                   f"<span style='color:#9ca3af'> : </span>"
-                   f"<a href='{strLink}' style='text-decoration:none'><span style='color:{STR_TEXT_COLOR_TOKEN}'>"
-                   f"{self._ContentHtml(objMessage.strContent, objMessage.dictEmojis)}</span></a>")
-        self._AppendHtml(strHtml)
+        strInner = (f"{self._TimeHtml(objMessage.dtTime)}{strRole}"
+                    f"<a href='{strLink}' style='text-decoration:none'>"
+                    f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b></a>"
+                    f"<br><a href='{strLink}' style='text-decoration:none'><span style='color:{STR_TEXT_COLOR_TOKEN}'>"
+                    f"{self._ContentHtml(objMessage.strContent, objMessage.dictEmojis)}</span></a>")
+        self._AppendHtml(self._Row(strInner, f"@@NICK{strNickColor}@@"))
+        self._SendOverlay({
+            "type": "chat", "time": objMessage.dtTime.strftime("%H:%M"), "nick": objMessage.strNickname,
+            "color": self._OverlayNickColor(objMessage.strSenderChannelId or objMessage.strNickname),
+            "role": objMessage.strRoleName or "",
+            "roleColor": DICT_ROLE_COLORS.get(objMessage.strUserRole, "#495057"),
+            "parts": self._OverlayParts(objMessage.strContent, objMessage.dictEmojis)})
 
     def _RememberUserChat(self, objMessage: ChzzkChatMessage) -> None:
         """시청자별 채팅을 모아 둬요. ('시청자 정보' 창용. 프로그램을 끄면 사라져요)"""
@@ -395,25 +445,34 @@ class ChatWindow(QWidget):
             strRoleColor = {"주인": "#e03131", "모더": "#1971c2", "멤버": "#2f9e44"}.get(objMessage.strRoleName, "#495057")
             strRole = f"<span style='background:{strRoleColor}; color:#ffffff'>&nbsp;{objMessage.strRoleName}&nbsp;</span> "
         strNickColor = self._NickColor("yt:" + (objMessage.strAuthorChannelId or objMessage.strNickname))
-        strHtml = (f"{self._TimeHtml(objMessage.dtTime)}"
-                   f"<span style='background:#ff0000; color:#ffffff'>&nbsp;YT&nbsp;</span> {strRole}"
-                   f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b>"
-                   f"<span style='color:#9ca3af'> : </span>"
-                   f"<span style='color:{STR_TEXT_COLOR_TOKEN}'>{html.escape(objMessage.strText)}</span>")
-        self._AppendHtml(strHtml)
+        strInner = (f"{self._TimeHtml(objMessage.dtTime)}"
+                    f"<span style='background:#ff0000; color:#ffffff'>&nbsp;YT&nbsp;</span> {strRole}"
+                    f"<b style='color:@@NICK{strNickColor}@@'>{html.escape(objMessage.strNickname)}</b>"
+                    f"<br><span style='color:{STR_TEXT_COLOR_TOKEN}'>{html.escape(objMessage.strText)}</span>")
+        self._AppendHtml(self._Row(strInner, "#ff0000"))
+        self._SendOverlay({
+            "type": "youtube", "time": objMessage.dtTime.strftime("%H:%M"), "nick": objMessage.strNickname,
+            "color": self._OverlayNickColor("yt:" + (objMessage.strAuthorChannelId or objMessage.strNickname)),
+            "role": objMessage.strRoleName or "", "roleColor": "#495057",
+            "parts": [["t", objMessage.strText or ""]]})
 
     def _AppendDonation(self, objDonation: ChzzkDonationMessage) -> None:
         strKind = {"VIDEO": "영상 후원", "MISSION": "미션 후원", "YOUTUBE": "[YT] 슈퍼챗",
                    "SUBSCRIPTION": "구독"}.get(objDonation.strDonationType, "후원")
         strText = self._ContentHtml(objDonation.strText, objDonation.dictEmojis) if objDonation.strText else ""
-        strHtml = (f"<table width='100%' cellpadding='4' style='background:#fff3bf; color:{STR_DONATION_TEXT}'>"
-                   f"<tr><td style='color:{STR_DONATION_TEXT}'>"
+        strHtml = (f"<table width='100%' cellspacing='0' cellpadding='0' style='background:#fff3bf'><tr>"
+                   f"<td width='6' bgcolor='#f08c00'></td>"
+                   f"<td style='padding:7px 10px 7px 10px; color:{STR_DONATION_TEXT}'>"
                    f"{self._TimeHtml(objDonation.dtTime)}"
-                   f"<b style='color:#e67700'>{strKind}"
+                   f"<b style='color:#d9480f; font-size:12pt'>{strKind}"
                    f"{'' if objDonation.strDonationType == 'SUBSCRIPTION' else ' ' + self._AmountText(objDonation)}</b> "
                    f"<b style='color:{STR_DONATION_TEXT}'>{html.escape(objDonation.strNickname)}</b>"
                    f"{'<br>' + strText if strText else ''}</td></tr></table>")
         self._AppendHtml(strHtml)
+        self._SendOverlay({
+            "type": "donation", "kind": strKind, "nick": objDonation.strNickname,
+            "amount": "" if objDonation.strDonationType == "SUBSCRIPTION" else self._AmountText(objDonation),
+            "parts": self._OverlayParts(objDonation.strText or "", objDonation.dictEmojis)})
         strLogText = (objDonation.strText or "").replace("\n", " ")
         strLogAmount = "" if objDonation.strDonationType == "SUBSCRIPTION" else self._AmountText(objDonation) + " "
         self.fnLog(f"[{'구독' if objDonation.strDonationType == 'SUBSCRIPTION' else '후원'}] {strKind} {strLogAmount}"
@@ -434,11 +493,20 @@ class ChatWindow(QWidget):
         return f"{objDonation.nPayAmount:,}원"
 
     def _AppendSystem(self, strMessage: str) -> None:
-        self._AppendHtml(f"<span style='color:#9ca3af'>— {html.escape(strMessage)} —</span>")
+        self._AppendHtml(f"<div align='center' style='color:#9ca3af; font-size:9pt; margin:4px 0'>"
+                         f"— {html.escape(strMessage)} —</div>")
 
     def _RenderHtml(self, strHtml: str) -> str:
         """색 자리표시 → 지금 색. 어두운 배경이면 닉네임 색을 밝게 해서 잘 보이게 해요."""
         strHtml = strHtml.replace(STR_TEXT_COLOR_TOKEN, self.strTextColor)
+        strTint = QColor(self.strBackgroundColor)
+        strTintMix = QColor(self.strTextColor)
+        for nIndex, strToken in enumerate(STR_ROW_BG_TOKENS):  # 바탕에 글자색을 아주 조금(0 / 6%) 섞어요.
+            nRatio = 0.06 * nIndex
+            strHtml = strHtml.replace(strToken, QColor(
+                round(strTint.red() * (1 - nRatio) + strTintMix.red() * nRatio),
+                round(strTint.green() * (1 - nRatio) + strTintMix.green() * nRatio),
+                round(strTint.blue() * (1 - nRatio) + strTintMix.blue() * nRatio)).name())
         if self.bDarkBackground:
             return RE_NICK_COLOR_TOKEN.sub(lambda objMatch: QColor(objMatch.group(1)).lighter(150).name(), strHtml)
         return RE_NICK_COLOR_TOKEN.sub(lambda objMatch: objMatch.group(1), strHtml)
@@ -446,6 +514,7 @@ class ChatWindow(QWidget):
     def SetColors(self, strBackground: str, strText: str) -> None:
         """색상 설정이 바뀌면 불려요. 이미 보이는 채팅도 새 색으로 다시 그려요."""
         self.strTextColor = strText
+        self.strBackgroundColor = strBackground
         objBackground = QColor(strBackground)
         self.bDarkBackground = (0.299 * objBackground.red() + 0.587 * objBackground.green()
                                 + 0.114 * objBackground.blue()) < 128
@@ -485,6 +554,28 @@ class ChatWindow(QWidget):
     # ===================================================================
     # 채팅 보내기
     # ===================================================================
+    def SendFromOverlay(self, strMessage: str) -> None:
+        """OBS 독 입력칸에서 온 채팅을 보내요. (결과는 채팅창 · OBS 화면에 안내로 나와요)"""
+        strMessage = (strMessage or "").strip()
+        if not strMessage:
+            return
+        objClient = self.fnGetClient()
+        if objClient is None or not objClient.bIsLoggedIn:
+            self._SendOverlay({"type": "system", "text": "치지직 로그인이 필요해요"})
+            self._OnStatus("error", "치지직 로그인이 필요해요.")
+            return
+        self.fnLog(f"[채팅] OBS 입력칸에서 보냄: {strMessage[:100]}")
+
+        def _Done(objResult):
+            if isinstance(objResult, Exception):
+                self._AppendHtml(f"<span style='color:#e03131'>보내기 실패: {html.escape(str(objResult))}</span>")
+                self._SendOverlay({"type": "system", "text": f"보내기 실패: {objResult}"})
+                return
+            if not self.objHub.bIsRunning:
+                self._AppendSystem(f"보냄: {strMessage}  (채팅창이 연결돼 있지 않아 목록엔 안 보여요)")
+
+        RunTask(self.listSendWorkers, lambda: objClient.SendChatMessage(strMessage), _Done)
+
     def OnSendClicked(self) -> None:
         strMessage = self.editMessage.text().strip()
         if not strMessage:
@@ -582,7 +673,9 @@ class ChatWindow(QWidget):
         bSelected = objCursor.hasSelection()
         strText = objCursor.selectedText() if bSelected else self.txtChat.toPlainText()
         # 줄바꿈 글자(문단 구분 U+2029)와 글자 사이 빈칸(&nbsp;)을 보통 글자로 바꿔요.
-        strText = strText.replace("\u2029", "\n").replace("\u2028", "\n").replace("\xa0", " ").strip()
+        strText = strText.replace("\u2029", "\n").replace("\u2028", "\n").replace("\xa0", " ")
+        # \ucc44\ud305 \uc904 \ubaa8\uc591(\ud45c) \ub54c\ubb38\uc5d0 \uc0dd\uae30\ub294 \ube48 \uc904\uc740 \ube7c\uace0, \uc904 \uc55e \u00b7 \ub4a4 \ube48\uce78\ub3c4 \uc815\ub9ac\ud574\uc694.
+        strText = "\n".join(strLine.strip() for strLine in strText.splitlines() if strLine.strip())
         if not strText:
             QToolTip.showText(QCursor.pos(), "복사할 채팅이 없어요", self)
             return

@@ -76,7 +76,11 @@ DICT_DEFAULT_CONFIG = {
             # 마지막으로 업데이트 안내를 본 버전 (새 버전으로 처음 켤 때만 안내를 보여줘요)
             "last_seen_version": "",
             # 메인 화면 오른쪽에 치지직 리모컨(스튜디오 화면)을 띄울지 / 후원 목록 · 미션 화면을 보일지
-            "show_remote_panel": True, "show_donation_mission": False},  # 설정이 비어 있을 때, 이전 버전 설정을 가져올지 켤 때 물어봐요
+            "show_remote_panel": True, "show_donation_mission": False,
+            # OBS 채팅 화면 (내 컴퓨터 안에서만 열리는 작은 웹 서버). 켜면 OBS 브라우저 소스 · 독에서 채팅을 볼 수 있어요.
+            "obs_overlay": False, "obs_overlay_port": 8765,
+            # 치지직 스튜디오 '알림 주소' (영상 후원 알림 화면). OBS 채팅 화면 위쪽에 같이 나와요. 비밀 값이 들어 있어요.
+            "obs_alert_url": ""},  # 설정이 비어 있을 때, 이전 버전 설정을 가져올지 켤 때 물어봐요
     # 화면 색: 색 묶음 이름 + 그 묶음에서 바꾼 색만 (gui/theme.py)
     "theme": {"preset": "라이트", "colors": {}},
 }
