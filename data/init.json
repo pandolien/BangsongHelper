@@ -50,6 +50,7 @@
   },
   "app": {
     "refresh_interval_sec": 30,
+    "auto_refresh": false,
     "auto_sync_category": false,
     "auto_donation": true,
     "auto_fallback_various": true,
@@ -64,6 +65,9 @@
     "last_seen_version": "0.0.3",
     "show_remote_panel": true,
     "show_donation_mission": false,
+    "obs_overlay": false,
+    "obs_overlay_port": 8765,
+    "obs_alert_url": "",
     "mission_default_min": 10,
     "mission_prefix_enabled": true,
     "mission_prefix": "미션",

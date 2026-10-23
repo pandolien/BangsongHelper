@@ -65,7 +65,7 @@ DICT_DEFAULT_CONFIG = {
     # auto_donation: 프로그램을 켜면 후원 받기를 자동으로 시작 (후원 목록 창을 안 열어도 기록돼요)
     # auto_fallback_various: 자동 맞추기 때 짝을 못 찾으면 '종합 게임' 으로
     # auto_detect_folder_games: 게임 설치 폴더(에픽 · 넥슨 등)에서 실행된 프로그램도 게임으로 알아보기
-    "app": {"refresh_interval_sec": 30, "auto_sync_category": False, "auto_donation": True, "auto_fallback_various": True,
+    "app": {"refresh_interval_sec": 30, "auto_refresh": False, "auto_sync_category": False, "auto_donation": True, "auto_fallback_various": True,
             "auto_detect_folder_games": True,
             "donation_sound": True,  # donation_sound: 후원이 오면 알림 소리 / subscription_sound: 구독이 오면 알림 소리
             "subscription_sound": True,

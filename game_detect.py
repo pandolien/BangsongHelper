@@ -20,6 +20,7 @@
 
 import ctypes
 import os
+import re
 import sys
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ STR_EXE_KEY_PREFIX = "exe:"
 DICT_KNOWN_GAMES = {
     "league of legends.exe": "리그 오브 레전드",
     "valorant-win64-shipping.exe": "발로란트",
+    "polaris-win64-shipping.exe": "철권 8",   # 철권 8 의 프로그램 이름 (개발 코드명 Polaris)
     "maplestory.exe": "메이플스토리",
     "lostark.exe": "로스트아크",
     "dnf.exe": "던전앤파이터",
@@ -281,6 +283,59 @@ def _ProcessPath(nPid: int) -> str:
         objKernel32.CloseHandle(hProcess)
 
 
+_RE_ACF_FIELD = re.compile(r'"(appid|installdir|name)"\s+"([^"]*)"', re.I)
+_dictManifestCache: Dict[str, Tuple[float, Dict[str, Tuple[str, str]]]] = {}   # 스팀 라이브러리 → (읽은 시각, 폴더이름 → (게임번호, 이름))
+F_MANIFEST_CACHE_SEC = 120.0
+DICT_FOLDER_STEAM_IDS: Dict[str, str] = {}   # 방금 찾은 프로그램 이름(소문자) → 스팀 게임번호 (ListFolderGames 가 채워요)
+
+
+def SteamAppFromExePath(strExePath: str) -> Optional[Tuple[str, str]]:
+    """스팀 라이브러리 안의 프로그램이면 (스팀 게임번호, 게임 이름) 을 돌려줘요. 아니면 None.
+
+    예) D:\\SteamLibrary\\steamapps\\common\\TEKKEN 8\\Polaris\\Binaries\\Win64\\Polaris-Win64-Shipping.exe
+        → 같은 steamapps 폴더의 appmanifest_1778820.acf 에서 installdir = "TEKKEN 8" 인 것을 찾아 ("1778820", "TEKKEN 8")
+    프로그램 이름(Polaris-...)은 게임 이름과 달라도, 설치 폴더 이름으로 어떤 게임인지 정확히 알 수 있어요.
+    """
+    strLower = (strExePath or "").replace("/", "\\").lower()
+    strMarker = "\\steamapps\\common\\"
+    nIndex = strLower.find(strMarker)
+    if nIndex < 0:
+        return None
+    strNorm = (strExePath or "").replace("/", "\\")
+    strSteamApps = strNorm[:nIndex + len("\\steamapps")]
+    listRest = strNorm[nIndex + len(strMarker):].split("\\")
+    if not listRest or not listRest[0]:
+        return None
+    dictFolders = _SteamManifests(strSteamApps)
+    return dictFolders.get(listRest[0].lower())
+
+
+def _SteamManifests(strSteamAppsDir: str) -> Dict[str, Tuple[str, str]]:
+    import time
+    fNow = time.monotonic()
+    objCached = _dictManifestCache.get(strSteamAppsDir.lower())
+    if objCached is not None and fNow - objCached[0] < F_MANIFEST_CACHE_SEC:
+        return objCached[1]
+    dictFolders: Dict[str, Tuple[str, str]] = {}
+    try:
+        for strFile in os.listdir(strSteamAppsDir):
+            if not (strFile.lower().startswith("appmanifest_") and strFile.lower().endswith(".acf")):
+                continue
+            try:
+                with open(os.path.join(strSteamAppsDir, strFile), "r", encoding="utf-8", errors="replace") as objFile:
+                    strText = objFile.read(8192)  # 필요한 값은 맨 앞에 있어요
+            except OSError:
+                continue
+            dictFields = {strKey.lower(): strValue for strKey, strValue in _RE_ACF_FIELD.findall(strText)}
+            strAppId, strInstallDir = dictFields.get("appid", ""), dictFields.get("installdir", "")
+            if strAppId.isdigit() and strInstallDir:
+                dictFolders[strInstallDir.lower()] = (strAppId, dictFields.get("name") or strInstallDir)
+    except OSError:
+        pass
+    _dictManifestCache[strSteamAppsDir.lower()] = (fNow, dictFolders)
+    return dictFolders
+
+
 def IsGameFolderPath(strPath: str) -> bool:
     """게임 설치 폴더 안의 '게임 같은' 프로그램이면 True. (런처 · 업데이트 · 안티치트 등은 빼요)"""
     strLower = (strPath or "").lower()
@@ -338,8 +393,14 @@ def ListFolderGames() -> List[Tuple[str, str]]:
         strExe = dictTable.get(nPid, "")
         if not strExe or strExe.lower() in setSeen:
             continue
-        if IsGameFolderPath(_ProcessPath(nPid)):
+        strPath = _ProcessPath(nPid)
+        if IsGameFolderPath(strPath):
             setSeen.add(strExe.lower())
+            objSteamApp = SteamAppFromExePath(strPath)
+            if objSteamApp is not None:   # 스팀 게임이면 이름 · 번호를 스팀 설치 정보에서 (창 제목보다 정확해요)
+                DICT_FOLDER_STEAM_IDS[strExe.lower()] = objSteamApp[0]
+                listGames.append((strExe, objSteamApp[1]))
+                continue
             strName = _CleanWindowTitle(strTitle) or os.path.splitext(strExe)[0]
             listGames.append((strExe, strName))
     return listGames
@@ -379,5 +440,10 @@ def PickCurrentGame(objSteamStatus, setRunningExes: Set[str], listMappedKeys: Li
     if objGame is not None:
         return objGame
     for strExe, strName in listFolderGames or []:
+        strSteamId = DICT_FOLDER_STEAM_IDS.get(strExe.lower())
+        if strSteamId and not IsNonGameSteamApp(strSteamId):
+            return DetectedGame(strSteamId, strName, "steam")   # 스팀 게임으로 취급 (스팀 API 키 없이도 돼요)
+        if strSteamId:
+            continue  # 스팀 도구(Wallpaper Engine 등)는 게임이 아니에요.
         return DetectedGame(ExeKey(strExe), strName, "folder")
     return None

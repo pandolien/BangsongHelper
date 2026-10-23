@@ -291,6 +291,8 @@ class MainWindow(QMainWindow):
         # 자동 새로고침 타이머 (알람 시계)
         self.objRefreshTimer = QTimer(self)
         self.objRefreshTimer.timeout.connect(self.OnRefreshClicked)
+        if self.chkAutoRefresh.isChecked():  # 지난번에 [자동] 을 켜 두었으면 시작할 때부터 돌려요.
+            self.objRefreshTimer.start(int(self.dictConfig["app"]["refresh_interval_sec"]) * 1000)
 
         self.sigTokenChanged.connect(self._UpdateLoginLabel)
 
@@ -340,7 +342,9 @@ class MainWindow(QMainWindow):
         self.btnRefresh = QPushButton("새로고침")
         self.btnRefresh.clicked.connect(self.OnRefreshClicked)
         self.chkAutoRefresh = QCheckBox("자동")
-        self.chkAutoRefresh.setToolTip("[설정] 의 새로고침 간격마다 자동으로 새로고침해요.")
+        self.chkAutoRefresh.setToolTip("[설정] 의 새로고침 간격마다 자동으로 새로고침해요. (선택은 저장돼요)\n"
+                                       "스팀 게임이 바뀌면 카테고리를 자동으로 맞추는 기능도 이 [자동] 이 켜져 있어야 돌아요.")
+        self.chkAutoRefresh.setChecked(bool(self.dictConfig["app"].get("auto_refresh", False)))  # (연결 전이라 저장은 안 돼요)
         self.chkAutoRefresh.toggled.connect(self.OnAutoRefreshToggled)
         for objWidget in (self.lblLastUpdated, self.btnHeaderLogin, self.btnRefresh, self.chkAutoRefresh):
             objRow.addWidget(objWidget)
@@ -1411,6 +1415,7 @@ class MainWindow(QMainWindow):
         self._PublishObsStatus(objLive)
 
     def OnAutoRefreshToggled(self, bChecked: bool) -> None:
+        self._SaveAppOption("auto_refresh", bChecked)
         if bChecked:
             nIntervalSec = int(self.dictConfig["app"]["refresh_interval_sec"])
             self.objRefreshTimer.start(nIntervalSec * 1000)

@@ -51,8 +51,10 @@ def _Download(strUrl: str) -> bytes:
 class EmojiCache:
     """주소 → 그림(QImage). fnOnReady(주소, 그림) 은 화면 스레드에서 불려요."""
 
-    def __init__(self, fnOnReady: Callable[[str, QImage], None]):
+    def __init__(self, fnOnReady: Callable[[str, QImage], None], fnLog: Optional[Callable[[str], None]] = None):
         self.fnOnReady = fnOnReady
+        self.fnLog = fnLog or (lambda strMessage: None)
+        self.setLoggedHosts: Set[str] = set()   # 같은 도메인 문제는 한 번만 로그에 남겨요 (주소 전체는 남기지 않아요)
         self.dictImages: Dict[str, QImage] = {}
         self.setPending: Set[str] = set()
         self.setFailed: Set[str] = set()
@@ -63,8 +65,10 @@ class EmojiCache:
         objImage = self.dictImages.get(strUrl)
         if objImage is not None:
             return objImage
-        if (strUrl in self.setPending or strUrl in self.setFailed or not IsAllowedImageUrl(strUrl)
-                or len(self.dictImages) >= N_MAX_IMAGES):
+        if not IsAllowedImageUrl(strUrl):
+            self._LogOnce(strUrl, "허용되지 않은 주소라 그림을 받지 않아요 (이 도메인을 알려 주시면 허용 목록에 추가할게요)")
+            return None
+        if strUrl in self.setPending or strUrl in self.setFailed or len(self.dictImages) >= N_MAX_IMAGES:
             return None
         self.setPending.add(strUrl)
         RunTask(self.listWorkers, lambda: _Download(strUrl), lambda objResult: self._Done(strUrl, objResult))
@@ -80,3 +84,16 @@ class EmojiCache:
             self.fnOnReady(strUrl, objImage)
         elif len(self.setFailed) < N_MAX_FAILED:
             self.setFailed.add(strUrl)  # 실패한 주소는 다시 시도하지 않아요.
+            self._LogOnce(strUrl, f"그림을 받지 못했어요: {objResult if isinstance(objResult, Exception) else '그림 형식이 아니에요'}")
+
+    def _LogOnce(self, strUrl: str, strMessage: str) -> None:
+        """도메인(호스트)마다 한 번만 로그에 남겨요. (너무 많이 쌓이지 않게 · 주소 전체는 남기지 않아요)"""
+        try:
+            strHost = urllib.parse.urlparse(strUrl or "").hostname or "알 수 없음"
+        except ValueError:
+            strHost = "알 수 없음"
+        strKey = f"{strHost}|{strMessage[:20]}"
+        if strKey in self.setLoggedHosts or len(self.setLoggedHosts) >= 20:
+            return
+        self.setLoggedHosts.add(strKey)
+        self.fnLog(f"[이모티콘] {strHost}: {strMessage}")
