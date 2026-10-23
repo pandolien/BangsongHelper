@@ -2,28 +2,16 @@
 cd /d "%~dp0"
 
 rem NOTE: keep this file ASCII only. Korean text breaks cmd.exe parsing.
-
-rem 1) First run or libraries missing -> run install.bat (installs Python too if needed)
-if not exist ".venv\Scripts\python.exe" goto :Install
-".venv\Scripts\python.exe" -c "import socketio, requests, PySide6" 2> nul
-if errorlevel 1 goto :Install
-goto :Run
-
-:Install
-echo [SETUP] Running install.bat first...
-call "%~dp0install.bat" /nopause
-if errorlevel 1 (
-    echo [ERROR] Setup failed. Check the messages above.
-    pause
-    exit /b 1
+rem
+rem  1) update.bat runs first (downloads the newest program, KEEPS your settings).
+rem     To turn the automatic update off, create an empty file named no_update.txt next to this file.
+rem  2) Then start_app.bat starts the program (installs Python / libraries on the first run).
+rem
+rem The block below is read by cmd.exe all at once, so the update can safely replace this very file.
+rem A bare exit /b would lose the exit code, so it is passed on with call exit /b %%errorlevel%% instead.
+rem Do not put round brackets inside the block, cmd.exe would end the block early.
+(
+    if not exist "no_update.txt" if exist "update.bat" call "%~dp0update.bat" /nopause /quiet
+    call "%~dp0start_app.bat" %*
+    call exit /b %%errorlevel%%
 )
-
-:Run
-rem 2) Start the program (add a command like "run.bat status" for CLI mode,
-rem    or "run.bat --test" to use data\init_test.json instead of data\init.json)
-".venv\Scripts\python.exe" main.py %*
-set "EXIT_CODE=%errorlevel%"
-rem When double-clicked and something went wrong, keep the window open to read the error.
-if not "%EXIT_CODE%"=="0" if "%~1"=="" pause
-if not "%EXIT_CODE%"=="0" if /i "%~1"=="--test" if "%~2"=="" pause
-exit /b %EXIT_CODE%

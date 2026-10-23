@@ -20,5 +20,9 @@ Log/
 data/init_test.json
 data/*_test.*
 data/*.bak
+data/init.backup.json
+data/game_map.backup.txt
+data/*.tmp
+no_update.txt
 data/moderation_history.json
 data/moderation_history.json.tmp
