@@ -9,7 +9,9 @@ OBS 에서 쓰는 방법
 
 주소 뒤에 옵션을 붙일 수 있어요. (예: http://127.0.0.1:8765/chat?theme=light&size=24&lines=20)
   theme=dark|light   글자색 (기본 dark = 흰 글자 + 그림자, 투명 배경에 어울려요)
-  bg=transparent|solid   배경 (기본 transparent)
+  bg=transparent|solid   배경 (방송 화면용 /chat 은 기본 transparent, OBS 독 /dock 은 기본 solid=어두운 배경)
+                     (OBS 독은 투명 배경을 흰색으로 보여줘서, 흰 글씨가 안 보이는 일이 없게 독은 어둡게 칠해요)
+  rowalpha=65        theme=dark 일 때 채팅 줄 뒤 어두운 상자의 진하기(0~100, 기본 65). 밝은 게임 화면 위에서 안 보이면 올리세요
   size=20            글자 크기(px, 12~60)
   lines=30           한 번에 보이는 줄 수 (5~100)
   time=0|1           시간 표시 (기본 0)
@@ -40,6 +42,7 @@ OBS 에서 쓰는 방법
   - 방송 상태(/status)는 방송 중 여부 · 시청자 수 · 제목 · 카테고리 · 현재 게임만 내보내요. (키 · 토큰 없음)
 """
 
+import hashlib
 import json
 import secrets
 import threading
@@ -86,8 +89,9 @@ STR_PAGE = r"""<!doctype html>
 <style>
 html,body{margin:0;padding:0;background:transparent;overflow:hidden;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif}
 body.solid{background:#101114}
-#log{position:fixed;left:0;right:0;bottom:0;padding:6px 10px}
-.row{display:flex;margin:0 0 5px 0;border-radius:6px;overflow:hidden;animation:in .25s ease-out;word-break:break-word}
+#log{position:fixed;left:0;right:0;bottom:0;padding:6px 10px;display:flex;flex-direction:column;justify-content:flex-end}
+/* 맨 아래부터 쌓이게(justify-content:flex-end): 칸보다 많아지면 오래된 위쪽이 잘리고 새 채팅은 항상 보여요 */
+.row{flex:0 0 auto;display:flex;margin:0 0 5px 0;border-radius:6px;overflow:hidden;animation:in .25s ease-out;word-break:break-word}
 .bar{flex:0 0 4px}
 .body{padding:4px 9px;line-height:1.35}
 .nick{font-weight:700;margin-right:6px}
@@ -106,7 +110,7 @@ body.solid{background:#101114}
 #hint{white-space:pre-line;position:fixed;left:12px;right:12px;top:42%;text-align:center;font-size:14px;color:#adb5bd;text-shadow:0 1px 2px #000;display:none}
 #hint.err{color:#ffa8a8}
 #msg{position:fixed;left:12px;right:12px;bottom:90px;font-size:13px;color:#ffa8a8;text-shadow:0 1px 2px #000;display:none}
-.dark .row{background:rgba(0,0,0,.35)}
+.dark .row{background:rgba(0,0,0,var(--rowalpha,.65))}
 .dark .txt{color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,.9)}
 .light .row{background:rgba(255,255,255,.80)}
 .light .txt{color:#1f2937}
@@ -137,7 +141,9 @@ var showTime=q.get('time')==='1',showDon=q.get('donation')!=='0',backlog=q.get('
 var theme=q.get('theme')==='light'?'light':'dark';
 var log=document.getElementById('log');
 log.className=theme;log.style.fontSize=size+'px';
-if(q.get('bg')==='solid')document.body.className='solid';
+log.style.setProperty('--rowalpha',(num('rowalpha',65,0,100)/100).toString());
+// 독(input=1)은 기본으로 어두운 배경 (OBS 독은 투명 배경을 흰색으로 보여줘서 흰 글씨가 안 보여요). 방송 화면은 기본 투명.
+if(q.get('bg')==='solid'||(q.get('input')==='1'&&q.get('bg')!=='transparent'))document.body.className='solid';
 function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;}
 function fill(box,parts){
   (parts||[]).forEach(function(p){
@@ -175,7 +181,7 @@ if(ALERT&&q.get('alert')!=='0'&&(q.get('input')!=='1'||q.get('alert')==='1')){
   f.style.cssText='position:fixed;left:0;top:0;width:100%;height:'+altH+'%;border:0;background:transparent;pointer-events:none';
   document.getElementById('alertbox').appendChild(f);log.style.maxHeight=(100-altH)+'%';log.style.overflow='hidden';
 }
-var TOKEN="@@TOKEN@@";
+var TOKEN="@@TOKEN@@",VER="@@VER@@";
 var dock=q.get('input')==='1';
 if(dock){
   var tools=document.getElementById('tools'),stat=document.getElementById('stat'),msg=document.getElementById('msg');
@@ -226,6 +232,7 @@ function setHint(t,err){if(!showHint)return;hint.textContent=t;hint.className=er
 function poll(){
   if(busy)return;busy=true;
   jf('/events?after='+last).then(function(r){if(!r.ok)throw new Error('http');return r.json();}).then(function(d){
+    if(d.ver&&d.ver!==VER){location.reload();return;}   // 프로그램이 업데이트돼 화면 모양이 바뀌었으면 OBS 독 · 소스가 스스로 새로고침해요
     (d.events||[]).forEach(add);last=d.last;
     setHint(log.children.length?'':'채팅을 기다리는 중… (연결됨)',false);
   }).catch(function(){setHint('프로그램에 연결할 수 없어요.\n방송 도우미 → [보기] → OBS 채팅 화면 켜기 가 체크돼 있는지, 주소의 포트 번호가 맞는지 확인해 주세요.',true);}).then(function(){busy=false;});
@@ -234,6 +241,9 @@ setInterval(poll,600);poll();
 })();
 </script></body></html>
 """
+
+# 화면 모양(STR_PAGE)이 바뀌면 달라지는 번호. 열려 있는 OBS 독 · 소스가 이 번호가 달라진 걸 보고 스스로 새로고침해요.
+STR_PAGE_VERSION = hashlib.sha1(STR_PAGE.encode("utf-8")).hexdigest()[:8]
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -262,7 +272,7 @@ class _Handler(BaseHTTPRequestHandler):
         objUrl = urllib.parse.urlparse(self.path)
         if objUrl.path in ("/", "/chat", "/dock"):
             strAlert = objOverlay.strAlertUrl if IsAllowedAlertUrl(objOverlay.strAlertUrl) else ""
-            strPage = (STR_PAGE.replace("@@TOKEN@@", objOverlay.strToken)
+            strPage = (STR_PAGE.replace("@@TOKEN@@", objOverlay.strToken).replace("@@VER@@", STR_PAGE_VERSION)
                        .replace("@@ALERT@@", json.dumps(strAlert).replace("</", "<\\/")))
             self._Send(200, strPage.encode("utf-8"), "text/html; charset=utf-8",
                        strFrameSrc=urllib.parse.urlparse(strAlert).netloc if strAlert else "")
@@ -273,7 +283,7 @@ class _Handler(BaseHTTPRequestHandler):
                 nAfter = int(urllib.parse.parse_qs(objUrl.query).get("after", ["0"])[0])
             except ValueError:
                 nAfter = 0
-            baBody = json.dumps(objOverlay.EventsAfter(nAfter), ensure_ascii=False).encode("utf-8")
+            baBody = json.dumps(dict(objOverlay.EventsAfter(nAfter), ver=STR_PAGE_VERSION), ensure_ascii=False).encode("utf-8")
             self._Send(200, baBody, "application/json; charset=utf-8")
         else:
             self._Send(404, b"not found", "text/plain; charset=utf-8")
@@ -373,6 +383,23 @@ class OverlayServer:
         self.objThread = threading.Thread(target=objHttpd.serve_forever, name="obs-overlay", daemon=True)
         self.objThread.start()
         return True, self.Url()
+
+    def StartWithFallback(self, nPort: int = N_DEFAULT_PORT, nTries: int = 10) -> Tuple[bool, str]:
+        """nPort 를 못 열면(다른 프로그램이 쓰는 중) 바로 다음 번호들을 차례로 시도해요. 열린 번호는 self.nPort."""
+        if self.bIsRunning:
+            return True, self.Url()
+        strLastError = ""
+        for nOffset in range(max(1, nTries)):
+            nTry = int(nPort) + nOffset
+            if nTry > 65535:
+                break
+            bOk, strMessage = self.Start(nTry)
+            if bOk:
+                return True, strMessage
+            strLastError = strMessage
+            if "올바르지 않아요" in strMessage:   # 번호 자체가 틀리면 다음 번호를 시도해도 소용없어요.
+                break
+        return False, strLastError
 
     def Stop(self) -> None:
         objHttpd, self.objHttpd = self.objHttpd, None

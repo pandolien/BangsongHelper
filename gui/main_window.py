@@ -399,6 +399,7 @@ class MainWindow(QMainWindow):
         self.actObs.toggled.connect(self._SetObsOverlay)
         objView.addAction("OBS 독 주소 복사 (채팅 · 제목 입력 + 방송 상태)", lambda: self._CopyObsUrl(bDock=True))
         objView.addAction("OBS 방송 화면용 채팅 주소 복사 (보기 전용)", lambda: self._CopyObsUrl(bDock=False))
+        objView.addAction("OBS 채팅 포트 번호 바꾸기...", self._ChangeObsPort)
         objView.addAction("OBS 영상 후원 알림 주소 설정...", self._SetObsAlertUrl)
         objView.addAction("OBS 리모컨(영상 후원) 주소 복사", self._CopyObsRemoteUrl)
         objView.addAction("업데이트 안내 보기...", self._ShowWhatsNew)
@@ -1132,7 +1133,19 @@ class MainWindow(QMainWindow):
     def _SetObsOverlay(self, bOn: bool, bSave: bool = True) -> None:
         """OBS 채팅 화면(내 컴퓨터 안에서만 열리는 주소)을 켜거나 꺼요."""
         if bOn:
-            bOk, strMessage = self.objOverlay.Start(self._ObsPort())
+            nWanted = self._ObsPort()
+            bOk, strMessage = self.objOverlay.StartWithFallback(nWanted)
+            if bOk and self.objOverlay.nPort != nWanted:
+                # 원하던 번호를 다른 프로그램이 쓰고 있어서 다음 번호로 열었어요. 앞으로도 같은 주소가 되게 저장해요.
+                self.Log(f"[안내] 포트 {nWanted} 는 다른 프로그램이 쓰고 있어서 {self.objOverlay.nPort} 로 열었어요. "
+                         "OBS 에는 새 주소를 다시 붙여넣어 주세요. ([보기] → OBS 주소 복사)")
+                self.dictConfig["app"]["obs_overlay_port"] = self.objOverlay.nPort
+                self._SaveAppOption("obs_overlay_port", self.objOverlay.nPort)
+                if bSave:
+                    QMessageBox.information(
+                        self, "OBS 채팅 화면",
+                        f"포트 {nWanted} 를 다른 프로그램이 쓰고 있어서 {self.objOverlay.nPort} 번으로 열었어요.\n"
+                        "OBS 에 붙여 둔 주소가 있으면 [보기] → OBS 주소 복사 로 새 주소를 다시 붙여넣어 주세요.")
             if not bOk:
                 self.Log(f"[경고] OBS 채팅 화면을 켤 수 없어요: {strMessage}")
                 self.actObs.blockSignals(True)
@@ -1146,6 +1159,24 @@ class MainWindow(QMainWindow):
             self.Log("OBS 채팅 화면을 껐어요.")
         if bSave:
             self._SaveAppOption("obs_overlay", bOn)
+
+    def _ChangeObsPort(self) -> None:
+        """OBS 채팅 화면의 포트 번호를 바꿔요. (다른 프로그램과 겹칠 때)"""
+        nNow = self.objOverlay.nPort if self.objOverlay.bIsRunning else self._ObsPort()
+        nNew, bOk = QInputDialog.getInt(
+            self, "OBS 채팅 포트 번호",
+            "OBS 채팅 주소의 포트 번호예요. (1024~65535)\n다른 프로그램과 겹치면 다른 번호로 바꾸세요.\n"
+            "바꾸면 OBS 에 붙인 주소도 새로 붙여넣어야 해요.", nNow, 1024, 65535)
+        if not bOk or nNew == nNow:
+            return
+        bWasOn = self.objOverlay.bIsRunning
+        if bWasOn:
+            self.objOverlay.Stop()
+        self.dictConfig["app"]["obs_overlay_port"] = nNew
+        self._SaveAppOption("obs_overlay_port", nNew)
+        self.Log(f"OBS 채팅 포트를 {nNew} 로 바꿨어요.")
+        if bWasOn:
+            self._SetObsOverlay(True, bSave=False)
 
     def _CopyObsUrl(self, bDock: bool = False) -> None:
         """OBS 주소 복사. bDock=True 면 독용(/dock: 방송 상태 + 제목 · 채팅 입력칸), 아니면 방송 화면용(/chat: 보기 전용)."""

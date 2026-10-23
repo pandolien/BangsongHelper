@@ -65,7 +65,7 @@
     "last_seen_version": "0.0.3",
     "show_remote_panel": true,
     "show_donation_mission": false,
-    "obs_overlay": false,
+    "obs_overlay": true,
     "obs_overlay_port": 8765,
     "obs_alert_url": "",
     "mission_default_min": 10,
