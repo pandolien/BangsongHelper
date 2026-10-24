@@ -36,6 +36,7 @@ SET_GENERIC_EXES = {
 
 _objLock = threading.Lock()
 _dictIndex: Optional[Dict[str, List[Tuple[str, str]]]] = None   # 프로그램 이름(소문자) → [(게임 이름, 스팀 번호 또는 "")]
+_dictBySteam: Dict[str, List[str]] = {}                          # 스팀 번호 → 게임 이름들 (디스코드 목록에 올라 있는 이름)
 _fLoadedAt = 0.0          # 이 목록을 받은 시각
 _fLastAttemptAt = 0.0
 _bRefreshing = False
@@ -88,15 +89,40 @@ def Lookup(strExe: str) -> Optional[Tuple[str, str]]:
     return None                    # 서로 다른 게임이 같은 이름을 써요 → 고르지 않아요
 
 
+def NamesFor(strGameId: str) -> List[str]:
+    """게임 열쇠(스팀 번호 또는 'exe:프로그램이름')로 디스코드 목록에 올라 있는 게임 이름들을 돌려줘요. 모르면 빈 목록.
+    프로그램 이름이 여러 게임에 쓰여서 애매하면(Lookup 이 None) 빈 목록이에요."""
+    strGameId = str(strGameId or "").strip()
+    with _objLock:
+        dictBySteam = _dictBySteam
+    if strGameId.isdigit():
+        return list(dictBySteam.get(strGameId, []))
+    if strGameId.lower().startswith("exe:"):
+        objFound = Lookup(strGameId[4:])
+        if objFound is not None:
+            strName, strSteamId = objFound
+            listNames = [strName]
+            for strOther in dictBySteam.get(strSteamId, []) if strSteamId else []:
+                if strOther not in listNames:
+                    listNames.append(strOther)
+            return listNames
+    return []
+
+
 def IsLoaded() -> bool:
     with _objLock:
         return bool(_dictIndex)
 
 
-def _SetIndex(dictIndex: Dict[str, List[Tuple[str, str]]], fLoadedAt: float) -> None:
-    global _dictIndex, _fLoadedAt
+def _SetIndex(dictIndex: Optional[Dict[str, List[Tuple[str, str]]]], fLoadedAt: float) -> None:
+    global _dictIndex, _fLoadedAt, _dictBySteam
+    dictBySteam: Dict[str, List[str]] = {}
+    for listEntries in (dictIndex or {}).values():
+        for strName, strSteamId in listEntries:
+            if strSteamId and strName not in dictBySteam.setdefault(strSteamId, []):
+                dictBySteam[strSteamId].append(strName)
     with _objLock:
-        _dictIndex, _fLoadedAt = dictIndex, fLoadedAt
+        _dictIndex, _fLoadedAt, _dictBySteam = dictIndex, fLoadedAt, dictBySteam
 
 
 def _LoadCache(strCachePath: str) -> bool:

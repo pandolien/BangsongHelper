@@ -40,6 +40,8 @@ OBS 에서 쓰는 방법
   - 채팅 보내기(/send) · 제목 바꾸기(/title)는 켤 때마다 새로 만드는 비밀 표(토큰) + JSON + 같은 주소에서 온
     요청일 때만 받아요. (다른 웹사이트가 내 이름으로 채팅을 보내거나 제목을 바꾸지 못하게 막아요.
     채팅은 100자 · 1.5초에 한 번, 제목은 100자 · 3초에 한 번까지)
+  - 게임 짝 저장(/pair) · 후보 검색(/pairsearch)도 같은 비밀 표가 있어야 해요. /pair 는 프로그램이 알려 준 후보
+    목록에 있는 카테고리만 받아요. (화면이 보낸 아무 값이나 저장하지 않아요)
   - 방송 상태(/status)는 방송 중 여부 · 시청자 수 · 제목 · 카테고리 · 현재 게임만 내보내요. (키 · 토큰 없음)
 """
 
@@ -61,6 +63,8 @@ TUPLE_ALERT_SUFFIXES = ("naver.com",)   # 영상 후원 알림 주소로 허용�
 N_MAX_ALERT_URL = 800
 N_MAX_TITLE_CHARS = 100
 F_TITLE_INTERVAL_SEC = 3.0
+N_MAX_PAIR_CHARS = 200             # 후보 열쇠("종류|아이디") 또는 검색어 길이
+F_PAIR_INTERVAL_SEC = 1.0
 N_MAX_SEND_CHARS = 100          # 치지직 채팅 한 번에 보낼 수 있는 길이
 N_MAX_BODY_BYTES = 2048
 F_SEND_INTERVAL_SEC = 1.5
@@ -108,6 +112,14 @@ body.solid{background:#101114}
 #stat .chip{display:inline-block;padding:1px 9px;border-radius:10px;background:#495057;color:#fff;margin-right:6px;font-size:13px}
 #stat .live{background:#e03131}#stat .t{font-weight:700;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stat .sub{color:#adb5bd;font-size:12px}
+#notice{display:none;margin-top:6px;padding:5px 8px;background:#f59f00;color:#1f2937;border-radius:6px;font-size:13px;font-weight:600;line-height:1.4}
+#nclose{float:right;margin-left:8px;border:0;background:transparent;color:#1f2937;font-size:15px;cursor:pointer}
+#ncands{margin-top:4px}
+#ncands button{margin:3px 4px 0 0;padding:3px 10px;border:0;border-radius:12px;background:#1f2937;color:#fff;font-size:13px;cursor:pointer}
+#ncands button:disabled{opacity:.5}
+#nform{display:flex;gap:4px;margin-top:5px}
+#nform input{flex:1;min-width:0;font-size:13px;padding:3px 6px;border-radius:6px;border:1px solid #b27800;background:#fff8e1;color:#1f2937}
+#nform button{padding:3px 10px;border:0;border-radius:6px;background:#1f2937;color:#fff;font-size:13px;cursor:pointer}
 #log.scroll{justify-content:flex-start;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin}
 #log.scroll>.row:first-child{margin-top:auto}   /* 채팅이 적을 땐 아래쪽에 모여요 */
 #log.scroll::-webkit-scrollbar{width:8px}#log.scroll::-webkit-scrollbar-thumb{background:#5c5f66;border-radius:4px}
@@ -129,7 +141,7 @@ img.em{height:1.5em;vertical-align:middle;margin:0 1px}
 </style></head>
 <body><div id="log"></div>
 <div id="alertbox"></div>
-<div id="stat"><span id="chips"></span><span class="t" id="ttext"></span><span class="sub" id="sub"></span></div>
+<div id="stat"><span id="chips"></span><span class="t" id="ttext"></span><span class="sub" id="sub"></span><div id="notice"><button id="nclose" type="button" title="닫기">✕</button><span id="ntext"></span><div id="ncands"></div><form id="nform" autocomplete="off"><input id="nq" maxlength="100" placeholder="맞는 이름이 없으면 다른 이름으로 검색 (예: 다크 소울 2)"><button type="submit">검색</button></form></div></div>
 <div id="hint"></div>
 <button id="newbtn" type="button"></button>
 <div id="msg"></div>
@@ -230,7 +242,41 @@ if(dock){
     e.preventDefault();post('/title',ttl.value.trim(),tgo,ttl,function(){ttl.blur();note('');});});
   var firstStat=true;
   function chip(text,cls){var c=el('span','chip'+(cls?' '+cls:''),text);return c;}
+  var dismissed='';
+  document.getElementById('nclose').addEventListener('click',function(){
+    dismissed=document.getElementById('ntext').textContent;document.getElementById('notice').style.display='none';layout();
+    postJson('/noticeclose','x',function(){});   // 프로그램 쪽 알림도 같이 꺼요 (어느 쪽에서 닫아도 둘 다 꺼져요)
+  });
+  var lastCands='';
+  function showCands(list){   // 후보 카테고리 버튼들. 버튼을 누르면 이 게임의 짝으로 저장해요. (모양이 바뀔 때만 다시 그려요)
+    var key=JSON.stringify(list||[]);if(key===lastCands)return;lastCands=key;
+    var box=document.getElementById('ncands');box.textContent='';
+    (list||[]).forEach(function(c){
+      var b=el('button','',c.name);b.type='button';b.title='이 게임의 치지직 카테고리를 이걸로 저장하고 바꿔요';
+      b.addEventListener('click',function(){
+        b.disabled=true;
+        postJson('/pair',c.key,function(ok,err){b.disabled=false;if(ok){note('짝을 저장했어요: '+c.name);setTimeout(pollStatus,500);}else note(err||'저장하지 못했어요');});
+      });
+      box.appendChild(b);
+    });
+  }
+  function postJson(path,text,done){
+    fetch(path,{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-Overlay-Token':TOKEN},body:JSON.stringify({text:text})})
+      .then(function(r){return r.json().then(function(d){return [r.ok,d];});})
+      .then(function(x){done(x[0],(x[1]||{}).error);})
+      .catch(function(){done(false,'프로그램에 연결할 수 없어요');});
+  }
+  document.getElementById('nform').addEventListener('submit',function(e){
+    e.preventDefault();var q=document.getElementById('nq').value.trim();if(!q)return;
+    postJson('/pairsearch',q,function(ok,err){if(ok){note('검색하는 중…');setTimeout(pollStatus,1500);}else note(err||'검색하지 못했어요');});
+  });
+  function showNotice(t,cands){   // 프로그램이 알려주는 주의 (예: 게임 카테고리를 못 찾았어요). 같은 알림은 닫으면 다시 안 떠요.
+    var box=document.getElementById('notice');
+    if(t&&t!==dismissed){document.getElementById('ntext').textContent=t;box.style.display='block';showCands(cands);}
+    else{box.style.display='none';if(!t){dismissed='';lastCands='';}}
+  }
   function showStatus(d){
+    showNotice((d&&d.notice)||'',(d&&d.candidates)||[]);
     var chips=document.getElementById('chips');chips.textContent='';
     if(!d||d.live===undefined){document.getElementById('ttext').textContent='방송 상태를 아직 못 받았어요 (프로그램에서 [새로고침])';layout();return;}
     chips.appendChild(chip(d.live?'● 방송 중':'방송 꺼짐',d.live?'live':''));
@@ -314,7 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802 — 채팅 보내기(/send) · 제목 바꾸기(/title)만 받아요.
         objOverlay: "OverlayServer" = self.server.objOverlay
         strPath = urllib.parse.urlparse(self.path).path
-        if strPath not in ("/send", "/title"):
+        if strPath not in ("/send", "/title", "/pair", "/pairsearch", "/noticeclose"):
             self._Send(405, b"method not allowed", "text/plain; charset=utf-8")
             return
         if not objOverlay.IsAllowedHost(self.headers.get("Host", "")):
@@ -343,7 +389,16 @@ class _Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError, AttributeError):
             self._SendJson(400, {"error": "요청 모양이 맞지 않아요"})
             return
-        bOk, strMessage = objOverlay.RequestTitle(strText) if strPath == "/title" else objOverlay.RequestSend(strText)
+        if strPath == "/title":
+            bOk, strMessage = objOverlay.RequestTitle(strText)
+        elif strPath == "/pair":
+            bOk, strMessage = objOverlay.RequestPair(strText, "pair")
+        elif strPath == "/pairsearch":
+            bOk, strMessage = objOverlay.RequestPair(strText, "search")
+        elif strPath == "/noticeclose":
+            bOk, strMessage = objOverlay.RequestPair(strText, "close")
+        else:
+            bOk, strMessage = objOverlay.RequestSend(strText)
         self._SendJson(200 if bOk else 400, {"ok": True} if bOk else {"error": strMessage})
 
 
@@ -369,6 +424,10 @@ class OverlayServer:
         self.fLastSendAt = 0.0
         self.fnSetTitle: Optional[Callable[[str], None]] = None  # 방송 제목 바꾸기를 처리하는 곳 (메인 창이 연결)
         self.fLastTitleAt = 0.0
+        self.fnPair: Optional[Callable[[str], None]] = None         # 후보를 골라 짝 저장 (메인 창이 연결)
+        self.fnPairSearch: Optional[Callable[[str], None]] = None   # 다른 이름으로 후보 검색 (메인 창이 연결)
+        self.fnNoticeClose: Optional[Callable[[str], None]] = None  # 알림 닫기 (프로그램 쪽 알림도 같이 꺼요)
+        self.fLastPairAt = 0.0
         self.dictStatus: Dict = {}   # 방송 상태 (메인 창이 새로고침할 때마다 갱신)
 
     @property
@@ -464,6 +523,27 @@ class OverlayServer:
                 return False, "너무 빨리 바꾸고 있어요. 잠깐 뒤에 다시 해 주세요"
             self.fLastTitleAt = fNow
         self.fnSetTitle(strText)
+        return True, ""
+
+    def RequestPair(self, strText: str, strKind: str) -> Tuple[bool, str]:
+        """OBS 독의 '짝 지정' 요청. strKind: "pair"(후보 하나를 골라 저장) / "search"(다른 이름으로 후보 검색).
+        길이 · 속도만 확인하고 메인 창으로 넘겨요. (실제로 저장해도 되는 값인지는 메인 창이 후보 목록과 대조해요)"""
+        if not isinstance(strText, str):
+            return False, "글자만 보낼 수 있어요"
+        strText = "".join(ch for ch in strText if ch.isprintable()).strip()
+        if not strText:
+            return False, "비어 있어요"
+        if len(strText) > N_MAX_PAIR_CHARS:
+            return False, "너무 길어요"
+        fnTarget = {"pair": self.fnPair, "search": self.fnPairSearch, "close": self.fnNoticeClose}.get(strKind)
+        if fnTarget is None:
+            return False, "준비되지 않았어요"
+        with self.objLock:
+            fNow = time.monotonic()
+            if fNow - self.fLastPairAt < F_PAIR_INTERVAL_SEC:
+                return False, "너무 빨라요. 잠깐 뒤에 다시 눌러 주세요"
+            self.fLastPairAt = fNow
+        fnTarget(strText)
         return True, ""
 
     def SetStatus(self, dictStatus: dict) -> None:

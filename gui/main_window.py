@@ -157,6 +157,12 @@ class Worker(QRunnable):
 class MainWindow(QMainWindow):
     # 토큰 갱신은 일꾼 스레드에서 일어나요. 화면 갱신은 반드시 메인 스레드에서 해야 해서 신호로 넘겨요.
     sigTokenChanged = Signal()
+    objNoticeGame = None   # 알림이 가리키는 게임 (화면이 만들어지기 전에도 읽을 수 있게 기본값을 둬요)
+    strNoticeText = ""
+    sigOverlayPair = Signal(str)        # OBS 독에서 고른 후보 ("종류|아이디")
+    sigOverlayPairSearch = Signal(str)  # OBS 독에서 입력한 다른 검색어
+    sigOverlayNoticeClose = Signal(str)  # OBS 독에서 알림을 닫았어요
+    listNoticeCandidates: list = []     # 알림에 같이 보여주는 후보 카테고리 (기본값. 인스턴스마다 새로 만들어요)
     sigOverlayTitle = Signal(str)  # OBS 독 제목칸에서 온 방송 제목 (다른 스레드에서 와도 화면 스레드에서 처리돼요)
 
     def __init__(self):
@@ -261,6 +267,7 @@ class MainWindow(QMainWindow):
         objLayout.setContentsMargins(0, 0, 0, 0)
         objLayout.setSpacing(0)
         objLayout.addWidget(objHeader)
+        objLayout.addWidget(self._BuildNoticeBar())  # 게임 카테고리를 못 찾았을 때 알려주는 줄 (평소엔 숨겨져 있어요)
         # 가운데: [채팅 (· 후원 · 미션)] | [치지직 리모컨] (경계선을 끌어서 폭 조절)
         self.objRemotePanel = RemotePanel(lambda: self.dictConfig["chzzk"].get("channel_id", ""))
         self.objRemotePanel.sigHideRequested.connect(lambda: self._SetRemotePanel(False))
@@ -281,6 +288,12 @@ class MainWindow(QMainWindow):
         self.objOverlay.fnSend = self.objChatWindow.sigOverlaySend.emit  # OBS 독 입력칸 → 채팅 보내기
         self.objOverlay.fnSetTitle = self.sigOverlayTitle.emit            # OBS 독 제목칸 → 방송 제목 바꾸기
         self.sigOverlayTitle.connect(self._OnOverlayTitle)
+        self.objOverlay.fnPair = self.sigOverlayPair.emit                  # OBS 독 후보 버튼 → 게임 짝 저장
+        self.objOverlay.fnPairSearch = self.sigOverlayPairSearch.emit      # OBS 독 검색칸 → 후보 다시 찾기
+        self.objOverlay.fnNoticeClose = self.sigOverlayNoticeClose.emit    # OBS 독 ✕ → 프로그램 알림도 닫기
+        self.sigOverlayNoticeClose.connect(lambda _text="": self._ClearNotice())
+        self.sigOverlayPair.connect(self._OnOverlayPair)
+        self.sigOverlayPairSearch.connect(self._OnOverlayPairSearch)
 
         # 맨 아래 상태줄: 마지막 로그 한 줄 (전체는 [보기] → 로그)
         self.lblStatusLog = QLabel("")
@@ -1083,12 +1096,111 @@ class MainWindow(QMainWindow):
         self.objStreamWindow.SetToolsVisible(bVisible)
         self._SaveAppOption("show_donation_mission", bVisible)
 
+    def _BuildNoticeBar(self) -> QWidget:
+        """'카테고리를 못 찾았어요' 알림 줄: 글 + [짝 지정하기] + [닫기]. (LoginBar 의 '주의' 색을 그대로 써요)"""
+        self.frmNotice = QWidget()
+        self.frmNotice.setObjectName("LoginBar")
+        self.frmNotice.setProperty("state", "off")
+        objRow = QHBoxLayout(self.frmNotice)
+        objRow.setContentsMargins(12, 6, 12, 6)
+        self.lblNotice = QLabel()
+        self.lblNotice.setTextFormat(Qt.TextFormat.PlainText)  # 게임 이름에 이상한 글자가 있어도 그냥 글자로만
+        self.lblNotice.setWordWrap(True)
+        btnFix = QPushButton("짝 지정하기")
+        btnFix.setToolTip("후보를 불러와서 맞는 치지직 카테고리를 골라요. (한 번만 하면 다음부터 자동)")
+        btnFix.clicked.connect(self._OnNoticeFix)
+        btnClose = QPushButton("닫기")
+        btnClose.clicked.connect(self._ClearNotice)
+        objRow.addWidget(self.lblNotice, 1)
+        objRow.addWidget(btnFix)
+        objRow.addWidget(btnClose)
+        self.frmNotice.hide()
+        return self.frmNotice
+
+    def _ShowNotice(self, strText: str, objGame: Optional[DetectedGame], listCandidates: Optional[list] = None) -> None:
+        """화면 위쪽 알림 줄과 OBS 독 맨 위에 같은 알림을 띄워요. (게임이 바뀌거나 짝을 정하면 사라져요)
+        listCandidates: 같이 보여줄 후보 카테고리들. OBS 독에서는 버튼으로 눌러 바로 짝을 저장할 수 있어요."""
+        bNew = strText != self.strNoticeText
+        self.objNoticeGame = objGame
+        self.strNoticeText = strText
+        self.listNoticeCandidates = list(listCandidates or [])[:8]
+        if bNew and self.dictConfig["app"].get("notice_sound", True):
+            self.objAlarm.Play("notice")  # 새 알림이 뜰 때 부드러운 소리 한 번 (방송 중 놓치지 않게)
+        self.lblNotice.setText(strText)
+        self.frmNotice.show()
+        self._PublishObsStatus()
+
+    def _ClearNotice(self) -> None:
+        if not self.strNoticeText or getattr(self, "frmNotice", None) is None:
+            return
+        self.objNoticeGame = None
+        self.strNoticeText = ""
+        self.listNoticeCandidates = []
+        self.frmNotice.hide()
+        self._PublishObsStatus()
+
+    @staticmethod
+    def _CandidateKey(objCategory) -> str:
+        return f"{objCategory.strCategoryType}|{objCategory.strCategoryId}"
+
+    def _OnOverlayPair(self, strKey: str) -> None:
+        """OBS 독에서 후보 버튼을 눌렀어요 → 이 게임의 짝으로 저장하고 그 카테고리로 바꿔요.
+        프로그램이 알려 준 후보 목록에 있는 것만 받아요. (화면이 보낸 값을 그대로 저장하지 않아요)"""
+        objGame = self.objNoticeGame
+        objCategory = next((objItem for objItem in self.listNoticeCandidates if self._CandidateKey(objItem) == strKey), None)
+        if objGame is None or objCategory is None:
+            self.objChatWindow._SendOverlay({"type": "system", "text": "이미 지난 알림이에요. 다시 확인해 주세요"})
+            return
+        self._SaveGameMap(objGame, objCategory.strCategoryType, objCategory.strCategoryId, objCategory.strCategoryValue)
+        self.Log(f"[짝 찾기] OBS 독에서 {objGame.strGameName} → {objCategory.strCategoryValue} 로 짝을 정했어요.")
+        objClient = self.objChzzkClient
+        objEntry = self.objGameMap.Get(objGame.strGameId)
+        if objEntry is not None and objClient is not None and objClient.bIsLoggedIn:
+            self._ApplyMappedCategory(objEntry, objGame.strGameName, bQuiet=True)
+            self.objChatWindow._SendOverlay({"type": "system", "text": f"짝을 저장하고 '{objCategory.strCategoryValue}' 로 바꿨어요"})
+        else:
+            self.objChatWindow._SendOverlay({"type": "system", "text": f"짝을 저장했어요 (치지직 로그인이 되면 '{objCategory.strCategoryValue}' 로 바뀌어요)"})
+
+    def _OnOverlayPairSearch(self, strQuery: str) -> None:
+        """OBS 독 검색칸: 다른 이름으로 치지직 카테고리를 찾아서 후보를 바꿔요."""
+        objClient = self.objChzzkClient
+        if self.objNoticeGame is None:
+            return
+        if objClient is None or not objClient.bIsLoggedIn:
+            self.objChatWindow._SendOverlay({"type": "system", "text": "치지직 로그인이 필요해요"})
+            return
+        objGame = self.objNoticeGame
+
+        def _Done(listFound):
+            if self.objNoticeGame is None or self.objNoticeGame.strGameId != objGame.strGameId:
+                return  # 그 사이에 다른 게임으로 바뀌었어요.
+            self.listNoticeCandidates = list(listFound)[:8]
+            self._PublishObsStatus()
+            self.Log(f"[짝 찾기] OBS 독에서 '{strQuery}' 로 검색 → 후보 {len(self.listNoticeCandidates)}개")
+            if not self.listNoticeCandidates:
+                self.objChatWindow._SendOverlay({"type": "system", "text": f"'{strQuery}' 검색 결과가 없어요"})
+
+        def _Fail(objError):
+            self.Log(f"[경고] OBS 독 카테고리 검색 실패: {objError}")
+            self.objChatWindow._SendOverlay({"type": "system", "text": f"검색 실패: {objError}"})
+
+        self.RunInBackground(lambda: objClient.SearchCategory(strQuery), _Done, _Fail)
+
+    def _OnNoticeFix(self) -> None:
+        """[짝 지정하기]: 이 게임의 후보를 불러와서 '방송 상태' 창에서 고르게 해요."""
+        objGame = self.objNoticeGame
+        if objGame is None:
+            return
+        self._AutoFindAndApply(objGame, bQuiet=False)
+        self._OpenWindow(self.dlgStatus)
+
     def _PublishObsStatus(self, objLive=None) -> None:
         """OBS 독 상단에 보여줄 방송 상태를 알려요. (방송 중 · 시청자 · 제목 · 카테고리 · 현재 게임)"""
         if objLive is not None:
             self.objLastLive = objLive
         objLive = getattr(self, "objLastLive", None)
         if objLive is None:
+            self.objOverlay.SetStatus({"notice": getattr(self, "strNoticeText", ""), "candidates": self._NoticeCandidatesForOverlay()})
             return
         objGame = getattr(self, "objCurrentGame", None)
         objClient = getattr(self, "objChzzkClient", None)
@@ -1098,7 +1210,12 @@ class MainWindow(QMainWindow):
             "category": objLive.strLiveCategoryValue or objLive.strLiveCategory or "",
             "game": objGame.strGameName if objGame else "",
             "loggedIn": bool(objClient is not None and objClient.bIsLoggedIn),
+            "notice": getattr(self, "strNoticeText", ""), "candidates": self._NoticeCandidatesForOverlay(),
             "at": datetime.now().strftime("%H:%M:%S")})
+
+    def _NoticeCandidatesForOverlay(self) -> list:
+        return [{"key": self._CandidateKey(objItem), "name": objItem.strCategoryValue or objItem.strCategoryId}
+                for objItem in self.listNoticeCandidates]
 
     def _OnOverlayTitle(self, strTitle: str) -> None:
         """OBS 독 제목칸에서 온 방송 제목 바꾸기. (결과는 프로그램 로그와 OBS 화면 안내로 알려요)"""
@@ -1382,6 +1499,8 @@ class MainWindow(QMainWindow):
                                               [objEntry.strSteamGameId for objEntry in self.objGameMap.ListEntries()],
                                               self.listLastFolderGames if self.chkFolderGames.isChecked() else [])
         objGame = self.objCurrentGame
+        if self.objNoticeGame is not None and (objGame is None or objGame.strGameId != self.objNoticeGame.strGameId):
+            self._ClearNotice()  # 다른 게임으로 바뀌었거나 게임이 꺼졌으면 예전 알림은 지워요.
         self._SetChip(self.lblChipGame, f"게임: {objGame.strGameName}" if objGame else "게임 없음")
         self._PublishObsStatus()
         if objGame is None:
@@ -1615,7 +1734,7 @@ class MainWindow(QMainWindow):
                 objBest = objResult.objBest
                 self._SaveGameMap(objGame, objBest.strCategoryType, objBest.strCategoryId, objBest.strCategoryValue)
                 self.Log(f"[짝 찾기] 자동으로 찾았어요: {objGame.strGameName} → {objBest.strCategoryValue} "
-                         f"(검색어 '{objResult.strMatchedQuery}')")
+                         f"({objResult.strStage + ', ' if objResult.strStage else ''}검색어 '{objResult.strMatchedQuery}')")
                 objEntry = self.objGameMap.Get(objGame.strGameId)
                 if objEntry is not None:
                     self._ApplyMappedCategory(objEntry, objGame.strGameName, bQuiet=bQuiet)
@@ -1642,9 +1761,14 @@ class MainWindow(QMainWindow):
                              f"(찾아본 말: {strTried}){strHint}")
                     self._ApplyMappedCategory(GameMapEntry(objGame.strGameId, strType, strId, strValue),
                                               objGame.strGameName, bQuiet=True)
+                    self._ShowNotice(f"'{objGame.strGameName}' 카테고리를 못 찾아서 '{strValue}' 으로 맞췄어요. "
+                                     "맞는 카테고리가 있으면 [짝 지정하기] (OBS 독은 아래 버튼) 로 한 번만 골라 주세요.",
+                                     objGame, objResult.listCandidates)
                 else:
                     self.Log(f"[짝 찾기] {objGame.strGameName} 은(는) 짝을 못 찾아서 자동 변경을 건너뛰어요. "
                              "[방송 관리] → '지금 게임으로 맞추기' 로 골라 주세요.")
+                    self._ShowNotice(f"'{objGame.strGameName}' 카테고리를 못 찾아서 방송 카테고리를 바꾸지 않았어요. "
+                                     "[짝 지정하기] (OBS 독은 아래 버튼) 를 눌러 골라 주세요.", objGame, objResult.listCandidates)
                 return
 
             # 버튼으로 눌렀을 때 → 후보를 보여주고 고르게 해요.
@@ -1698,6 +1822,8 @@ class MainWindow(QMainWindow):
             return
         self._ReloadGameMapTable()
         self.Log(f"짝 저장: {objSteam.strGameName} ↔ {strCategoryValue} (data/game_map.txt)")
+        if self.objNoticeGame is not None and self.objNoticeGame.strGameId == objSteam.strGameId:
+            self._ClearNotice()  # 이 게임의 짝을 정했으니 알림은 이제 필요 없어요.
 
     def _ApplyMappedCategory(self, objEntry: GameMapEntry, strGameName: str, bQuiet: bool = False) -> None:
         """짝 목록에 적힌 카테고리를 치지직에 적용해요."""

@@ -119,4 +119,4 @@ exe:polaris-win64-shipping.exe = GAME | TEKKEN8 | 철권 8   # TEKKEN8
 exe:darksoulsiii.exe = GAME | DARK_SOULS_III | 다크 소울 3   # DARK SOULS III
 exe:start_protected_game.exe = GAME | Elden_Ring | 엘든 링   # ELDEN RING
 exe:eldenring.exe = GAME | Elden_Ring | 엘든 링   # ELDEN RING
-exe:darksoulsii.exe = GAME | Dark_Souls_II | 다크 소울 2   # DARK SOULS II
+335300 = GAME | Dark_Souls_II | 다크 소울 2   # DARK SOULS™ II: Scholar of the First Sin

@@ -241,7 +241,7 @@ def SyncSteamGame(dictConfig: dict, objChzzk: ChzzkApiClient) -> int:
     objResult = FindCategoryForGame(objChzzk, objSteamStatus.strGameId, objSteamStatus.strGameName)
     if objResult.objBest is not None:
         objCategory = objResult.objBest
-        print(f"자동으로 찾았어요: {objCategory.strCategoryValue} (검색어 '{objResult.strMatchedQuery}')")
+        print(f"자동으로 찾았어요: {objCategory.strCategoryValue} ({objResult.strStage + ', ' if objResult.strStage else ''}검색어 '{objResult.strMatchedQuery}')")
     else:
         print("확실한 짝을 못 찾았어요. 맞는 치지직 카테고리를 골라주세요. (치지직에 없는 게임이면 0 = 종합 게임)")
         objCategory = PickCategory(objChzzk, objResult.listQueries[0] if objResult.listQueries else objSteamStatus.strGameName)

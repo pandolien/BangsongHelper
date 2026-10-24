@@ -16,6 +16,11 @@
     5) 이름이 똑같진 않아도 '거의 똑같은' 후보가 딱 하나 있으면(띄어쓰기 · 철자만 조금 다름, 숫자 · 로마 숫자는 같음)
        '추정 짝' 으로 써요. (짝으로 저장하지는 않고, 로그에 알려요)
     6) 그래도 못 찾으면 → '종합 게임' 카테고리를 쓰게 할 수 있어요. (짝으로 저장하지는 않아요)
+
+    찾는 순서 (FindCategoryForGame)
+      1차: 디스코드 공개 게임 목록의 이름 (+ 지금 게임 이름 · 아는 한국어 이름) 으로 검색
+      2차: 스팀 상점의 한국어 이름으로 검색 (1차에서 이미 찾아본 말은 건너뛰어요)
+      3차: 그래도 없으면 → 종합 게임으로 두고, 화면 · OBS 독에 알림 (후보도 같이)
 """
 
 import difflib
@@ -97,6 +102,7 @@ class MatchResult:
     listQueries: List[str] = field(default_factory=list)        # 실제로 검색해 본 말들
     strMatchedQuery: str = ""                        # 확실한 짝을 찾은 검색어
     objProbable: Optional[object] = None             # 이름이 거의 같은 후보 하나 (확실하진 않아요. 저장하지 않고 쓰기만 해요)
+    strStage: str = ""                               # 어느 단계에서 찾았는지 ("1차 디스코드 목록" / "2차 스팀 한국어 이름")
 
 
 def NormalizeName(strName: str) -> str:
@@ -230,15 +236,24 @@ def BuildQueries(listNames: List[str]) -> List[str]:
     return listQueries
 
 
-def FindCategory(objChzzkClient, listNames: List[str], nMaxQueries: int = 5) -> MatchResult:
+def FindCategory(objChzzkClient, listNames: List[str], nMaxQueries: int = 5, setSkipQueries: Optional[set] = None,
+                 objPrevious: Optional[MatchResult] = None) -> MatchResult:
     """게임 이름들로 치지직 카테고리를 찾아요. (인터넷 요청이 있으니 화면 스레드에서 부르지 마세요)
 
     objChzzkClient: SearchCategory(검색어) 가 있는 치지직 심부름꾼
     listNames     : 게임 이름들 (한국어 이름을 앞에 두면 더 잘 찾아요)
+    setSkipQueries: 이미 찾아본 말(NormalizeName 한 것). 다음 단계에서 같은 검색을 되풀이하지 않게 건너뛰어요.
+    objPrevious   : 앞 단계 결과. 후보 · 찾아본 말을 이어받아요.
     """
     objResult = MatchResult()
     setSeenIds = set()
-    for strQuery in BuildQueries(listNames)[:nMaxQueries]:
+    if objPrevious is not None:
+        objResult.listCandidates = list(objPrevious.listCandidates)
+        objResult.listQueries = list(objPrevious.listQueries)
+        setSeenIds = {f"{objItem.strCategoryType}/{objItem.strCategoryId}" for objItem in objResult.listCandidates}
+    setSkip = setSkipQueries or set()
+    listQueries = [strQuery for strQuery in BuildQueries(listNames) if NormalizeName(strQuery) not in setSkip]
+    for strQuery in listQueries[:nMaxQueries]:
         objResult.listQueries.append(strQuery)
         try:
             listFound = objChzzkClient.SearchCategory(strQuery)
@@ -262,19 +277,55 @@ def FindCategory(objChzzkClient, listNames: List[str], nMaxQueries: int = 5) -> 
 
 
 def FindCategoryForGame(objChzzkClient, strGameId: str, strGameName: str) -> MatchResult:
-    """지금 하는 게임(스팀 gameid 또는 exe 열쇠)에 맞는 치지직 카테고리를 찾아요.
+    """지금 하는 게임(스팀 gameid 또는 exe 열쇠)에 맞는 치지직 카테고리를 단계별로 찾아요.
 
-    스팀 게임이면 스팀 상점의 한국어 이름을 먼저 써요. 프로그램 감지 게임은 아는 이름(예: 리그 오브 레전드)으로 찾아요.
+    1차: 디스코드 공개 게임 목록의 이름 (+ 지금 게임 이름, 내장 한국어 이름 목록)
+    2차: 스팀 상점의 한국어 이름 (스팀 번호를 모르면 이름으로 스팀 상점을 검색해서 번호부터 찾아요)
+    둘 다 실패하면 확실한 짝이 없는 결과 (후보 · 찾아본 말이 같이 들어 있어요) → 부르는 쪽이 종합 게임 + 알림으로 처리해요.
     """
+    # ---- 1차: 디스코드 목록 ----
+    try:
+        import discord_games   # 늦게 불러요 (목록이 없거나 꺼져 있어도 2차로 넘어가요)
+        listDiscordNames = discord_games.NamesFor(strGameId)
+    except Exception:
+        listDiscordNames = []
+    listNames1: List[str] = []
+    for strName in listDiscordNames + ([strGameName] if strGameName else []):
+        if strName and strName not in listNames1:
+            listNames1.append(strName)
+    listNames1 = KoreanNamesFor(listNames1) + listNames1     # 아는 한국어 이름이 있으면 그걸 먼저 (가장 정확해요)
+    objResult = FindCategory(objChzzkClient, listNames1)
+    if objResult.objBest is not None:
+        objResult.strStage = "1차 디스코드 목록 · 이름 목록"
+        return objResult
+
+    # ---- 2차: 스팀 상점의 한국어 이름 ----
     strSteamId = str(strGameId) if str(strGameId).isdigit() else ""
+    if not strSteamId:
+        strSteamId = _SteamIdFromDiscord(strGameId)
     if not strSteamId and strGameName:
         strSteamId = SearchSteamIdByName(strGameName)   # 스팀 번호를 모르면 이름으로 찾아봐요 (이름이 똑같은 게임이 하나일 때만)
-    listNames = GetSteamStoreNames(strSteamId) if strSteamId else []
-    if strGameName and strGameName not in listNames:
-        listNames.append(strGameName)
-    # 한국어 이름 목록에 있는 게임이면 그 이름을 맨 앞에 둬요. (가장 정확해요)
-    listNames = KoreanNamesFor(listNames) + listNames
-    return FindCategory(objChzzkClient, listNames)
+    listNames2 = GetSteamStoreNames(strSteamId) if strSteamId else []
+    if listNames2:
+        setTried = {NormalizeName(strQuery) for strQuery in objResult.listQueries}
+        objResult2 = FindCategory(objChzzkClient, KoreanNamesFor(listNames2) + listNames2, setSkipQueries=setTried, objPrevious=objResult)
+        if objResult2.objBest is not None:
+            objResult2.strStage = "2차 스팀 한국어 이름"
+            return objResult2
+        objResult = objResult2
+    return objResult
+
+
+def _SteamIdFromDiscord(strGameId: str) -> str:
+    """'exe:프로그램이름' 인 게임이 디스코드 목록에서 스팀 번호를 알려 주면 그 번호 ("" 이면 모름)"""
+    try:
+        import discord_games
+        if str(strGameId).lower().startswith("exe:"):
+            objFound = discord_games.Lookup(str(strGameId)[4:])
+            return objFound[1] if objFound else ""
+    except Exception:
+        pass
+    return ""
 
 
 def FallbackCategory():
