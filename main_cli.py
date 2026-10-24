@@ -65,7 +65,11 @@ def DetectCurrentGame(dictConfig: dict, bPrintSteamError: bool = True) -> Option
                 print(f"[스팀]  [오류] {objError}")
     try:
         setExes = ListRunningExeNames()
-        listFolderGames = ListFolderGames() if dictConfig["app"].get("auto_detect_folder_games", True) else []
+        import discord_games
+        from app_paths import DataPath
+        discord_games.EnsureLoaded(DataPath("discord_games.json"))  # 저장해 둔 게임 이름 목록을 불러와요 (오래됐으면 뒤에서 새로 받아요)
+        listFolderGames = (ListFolderGames(bool(dictConfig["app"].get("use_discord_game_list", True)))
+                           if dictConfig["app"].get("auto_detect_folder_games", True) else [])
     except OSError:
         setExes, listFolderGames = set(), []
     return PickCurrentGame(objSteamStatus, setExes, [objEntry.strSteamGameId for objEntry in GameMap().ListEntries()],

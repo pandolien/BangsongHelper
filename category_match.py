@@ -13,9 +13,12 @@
     3) 검색어와 '이름이 똑같은' 카테고리가 있으면 → 확실한 짝 (자동 저장해도 돼요)
        비슷하기만 하면 → 후보로만 보여줘요. (예: "ELDEN RING" 으로 찾았는데 "ELDEN RING 밤의 통치자" 만 나오면 다른 게임!)
     4) 스팀에 한국어 이름이 없는 유명 게임은 아래 '한국어 이름 목록' 으로 찾아요. (예: Counter-Strike 2 → 카운터 스트라이크 2)
-    5) 그래도 못 찾으면 → '종합 게임' 카테고리를 쓰게 할 수 있어요. (짝으로 저장하지는 않아요)
+    5) 이름이 똑같진 않아도 '거의 똑같은' 후보가 딱 하나 있으면(띄어쓰기 · 철자만 조금 다름, 숫자 · 로마 숫자는 같음)
+       '추정 짝' 으로 써요. (짝으로 저장하지는 않고, 로그에 알려요)
+    6) 그래도 못 찾으면 → '종합 게임' 카테고리를 쓰게 할 수 있어요. (짝으로 저장하지는 않아요)
 """
 
+import difflib
 import re
 import threading
 from dataclasses import dataclass, field
@@ -24,6 +27,7 @@ from typing import Dict, List, Optional
 import requests
 
 STR_STEAM_APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
+STR_STEAM_STORESEARCH_URL = "https://store.steampowered.com/api/storesearch/"
 F_TIMEOUT_SEC = 10.0
 
 # 스팀 상점 이름은 바뀔 일이 거의 없어서, 한 번 물어본 건 기억해 둬요. (프로그램 켜져 있는 동안)
@@ -92,6 +96,7 @@ class MatchResult:
     listCandidates: List[object] = field(default_factory=list)  # 후보들 (확실하지 않을 때 고르라고 보여줄 것)
     listQueries: List[str] = field(default_factory=list)        # 실제로 검색해 본 말들
     strMatchedQuery: str = ""                        # 확실한 짝을 찾은 검색어
+    objProbable: Optional[object] = None             # 이름이 거의 같은 후보 하나 (확실하진 않아요. 저장하지 않고 쓰기만 해요)
 
 
 def NormalizeName(strName: str) -> str:
@@ -99,6 +104,70 @@ def NormalizeName(strName: str) -> str:
     strName = (strName or "").lower()
     strName = re.sub(r"[™®©]", "", strName)
     return re.sub(r"[\s\-_:;,.!?'\"`’‘“”·/\\|()\[\]{}<>~]+", "", strName)
+
+
+F_PROBABLE_RATIO = 0.90      # 이 이상 닮아야 '거의 같은 이름'
+F_PROBABLE_GAP = 0.05        # 2등 후보와 이만큼 차이가 나야 '딱 하나'
+_RE_NUMBER_TOKEN = re.compile(r"\d+|\b(?:viii|vii|vi|iv|ix|iii|ii|xi|xii|x|v)\b", re.I)
+
+
+def _NumberTokens(strName: str) -> List[str]:
+    """이름 속 숫자 · 로마 숫자들 (후속작을 잘못 고르지 않게 이게 같아야 해요). "Civilization VII" → ['vii']"""
+    return [strToken.lower() for strToken in _RE_NUMBER_TOKEN.findall(strName or "")]
+
+
+def PickProbable(listCandidates: List[object], listQueries: List[str]):
+    """이름이 똑같은 후보는 없지만 '거의 같은' 후보가 딱 하나뿐이면 그것을 돌려줘요. 아니면 None.
+
+    조건: 닮은 정도 >= F_PROBABLE_RATIO, 숫자 · 로마 숫자가 똑같음, 2등과 F_PROBABLE_GAP 이상 차이.
+    (예: 'ELDEN RING' ↔ 'ELDEN RING 밤의 통치자' 는 다른 게임이라 닮은 정도가 낮아서 안 걸려요)
+    """
+    listScored = []
+    for objCategory in listCandidates:
+        strValue = objCategory.strCategoryValue
+        fBest = 0.0
+        for strQuery in listQueries:
+            if _NumberTokens(strValue) != _NumberTokens(strQuery):
+                continue
+            fBest = max(fBest, difflib.SequenceMatcher(None, NormalizeName(strValue), NormalizeName(strQuery)).ratio())
+        listScored.append((fBest, objCategory))
+    listScored.sort(key=lambda tupleItem: tupleItem[0], reverse=True)
+    if not listScored or listScored[0][0] < F_PROBABLE_RATIO:
+        return None
+    if len(listScored) > 1 and listScored[0][0] - listScored[1][0] < F_PROBABLE_GAP:
+        return None   # 비슷한 후보가 둘 이상이면 어느 게 맞는지 모르니까 고르지 않아요.
+    return listScored[0][1]
+
+
+_dictSearchCache: Dict[str, str] = {}
+
+
+def SearchSteamIdByName(strName: str) -> str:
+    """스팀 번호를 모르는 게임의 이름으로 스팀 상점을 검색해서, 이름이 '똑같은' 게임이 딱 하나면 그 번호를 돌려줘요.
+    (없거나 여러 개면 "" — 비슷한 이름의 다른 게임 · DLC 를 고르지 않아요)"""
+    strKey = NormalizeName(strName)
+    if len(strKey) < 3:
+        return ""
+    with _objCacheLock:
+        if strKey in _dictSearchCache:
+            return _dictSearchCache[strKey]
+    strFound = ""
+    try:
+        for strLang, strCc in (("english", "US"), ("korean", "KR")):
+            objResponse = requests.get(STR_STEAM_STORESEARCH_URL, timeout=F_TIMEOUT_SEC,
+                                       params={"term": strName, "l": strLang, "cc": strCc})
+            listItems = [dictItem for dictItem in (objResponse.json().get("items") or [])
+                         if isinstance(dictItem, dict) and str(dictItem.get("type", "app")) == "app"
+                         and NormalizeName(str(dictItem.get("name") or "")) == strKey and str(dictItem.get("id", "")).isdigit()]
+            setIds = {str(dictItem["id"]) for dictItem in listItems}
+            if len(setIds) == 1:
+                strFound = setIds.pop()
+                break
+    except (requests.RequestException, ValueError, AttributeError):
+        return ""   # 실패는 기억하지 않아요 (다음에 다시 시도)
+    with _objCacheLock:
+        _dictSearchCache[strKey] = strFound
+    return strFound
 
 
 def GetSteamStoreNames(strAppId: str) -> List[str]:
@@ -187,6 +256,8 @@ def FindCategory(objChzzkClient, listNames: List[str], nMaxQueries: int = 5) -> 
                 objResult.strMatchedQuery = strQuery
         if objResult.objBest is not None:
             break
+    if objResult.objBest is None:
+        objResult.objProbable = PickProbable(objResult.listCandidates, objResult.listQueries)
     return objResult
 
 
@@ -195,7 +266,10 @@ def FindCategoryForGame(objChzzkClient, strGameId: str, strGameName: str) -> Mat
 
     스팀 게임이면 스팀 상점의 한국어 이름을 먼저 써요. 프로그램 감지 게임은 아는 이름(예: 리그 오브 레전드)으로 찾아요.
     """
-    listNames = GetSteamStoreNames(strGameId) if str(strGameId).isdigit() else []
+    strSteamId = str(strGameId) if str(strGameId).isdigit() else ""
+    if not strSteamId and strGameName:
+        strSteamId = SearchSteamIdByName(strGameName)   # 스팀 번호를 모르면 이름으로 찾아봐요 (이름이 똑같은 게임이 하나일 때만)
+    listNames = GetSteamStoreNames(strSteamId) if strSteamId else []
     if strGameName and strGameName not in listNames:
         listNames.append(strGameName)
     # 한국어 이름 목록에 있는 게임이면 그 이름을 맨 앞에 둬요. (가장 정확해요)

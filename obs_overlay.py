@@ -13,7 +13,8 @@ OBS 에서 쓰는 방법
                      (OBS 독은 투명 배경을 흰색으로 보여줘서, 흰 글씨가 안 보이는 일이 없게 독은 어둡게 칠해요)
   rowalpha=65        theme=dark 일 때 채팅 줄 뒤 어두운 상자의 진하기(0~100, 기본 65). 밝은 게임 화면 위에서 안 보이면 올리세요
   size=20            글자 크기(px, 12~60)
-  lines=30           한 번에 보이는 줄 수 (5~100)
+  lines=30           보관하는 줄 수 (5~500). 방송 화면용 /chat 은 기본 30(맨 아래부터 쌓여요),
+                     OBS 독 /dock 은 기본 300 이고 위로 스크롤해서 이전 채팅을 볼 수 있어요
   time=0|1           시간 표시 (기본 0)
   donation=0|1       후원 · 구독 카드 표시 (기본 1)
   alert=0            영상 후원 알림 화면을 숨겨요 (기본: [보기] → OBS 영상 후원 알림 주소 설정 에 주소를 넣었으면 위쪽에 같이 나와요)
@@ -53,9 +54,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 N_DEFAULT_PORT = 8765
-N_KEEP_EVENTS = 200
+N_KEEP_EVENTS = 500        # 독이 위로 스크롤해서 볼 수 있는 이전 채팅 수 (lines 옵션 최대와 같게)
 STR_HOST = "127.0.0.1"
-N_MAX_POLL_EVENTS = 100
+N_MAX_POLL_EVENTS = 500
 TUPLE_ALERT_SUFFIXES = ("naver.com",)   # 영상 후원 알림 주소로 허용하는 도메인 (그 아래 주소 포함)
 N_MAX_ALERT_URL = 800
 N_MAX_TITLE_CHARS = 100
@@ -107,6 +108,10 @@ body.solid{background:#101114}
 #stat .chip{display:inline-block;padding:1px 9px;border-radius:10px;background:#495057;color:#fff;margin-right:6px;font-size:13px}
 #stat .live{background:#e03131}#stat .t{font-weight:700;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stat .sub{color:#adb5bd;font-size:12px}
+#log.scroll{justify-content:flex-start;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin}
+#log.scroll>.row:first-child{margin-top:auto}   /* 채팅이 적을 땐 아래쪽에 모여요 */
+#log.scroll::-webkit-scrollbar{width:8px}#log.scroll::-webkit-scrollbar-thumb{background:#5c5f66;border-radius:4px}
+#newbtn{position:fixed;left:50%;transform:translateX(-50%);bottom:90px;display:none;padding:5px 14px;border:0;border-radius:14px;background:#1971c2;color:#fff;font-size:13px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.5)}
 #hint{white-space:pre-line;position:fixed;left:12px;right:12px;top:42%;text-align:center;font-size:14px;color:#adb5bd;text-shadow:0 1px 2px #000;display:none}
 #hint.err{color:#ffa8a8}
 #msg{position:fixed;left:12px;right:12px;bottom:90px;font-size:13px;color:#ffa8a8;text-shadow:0 1px 2px #000;display:none}
@@ -126,6 +131,7 @@ img.em{height:1.5em;vertical-align:middle;margin:0 1px}
 <div id="alertbox"></div>
 <div id="stat"><span id="chips"></span><span class="t" id="ttext"></span><span class="sub" id="sub"></span></div>
 <div id="hint"></div>
+<button id="newbtn" type="button"></button>
 <div id="msg"></div>
 <div id="tools">
 <form id="tform" autocomplete="off"><input id="ttl" maxlength="100" placeholder="방송 제목 (바꾸려면 입력 후 Enter)"><button id="tgo" type="submit">제목 변경</button></form>
@@ -136,7 +142,8 @@ img.em{height:1.5em;vertical-align:middle;margin:0 1px}
 var q=new URLSearchParams(location.search);
 if(location.pathname==='/dock'&&!q.has('input'))q.set('input','1');  // /dock 주소는 input=1 을 따로 안 붙여도 돼요
 function num(k,d,lo,hi){var v=parseInt(q.get(k),10);if(isNaN(v))v=d;return Math.max(lo,Math.min(hi,v));}
-var size=num('size',20,12,60),maxLines=num('lines',30,5,100);
+var isDock=q.get('input')==='1';
+var size=num('size',20,12,60),maxLines=num('lines',isDock?300:30,5,500);
 var showTime=q.get('time')==='1',showDon=q.get('donation')!=='0',backlog=q.get('backlog')==='1'||(q.get('input')==='1'&&q.get('backlog')!=='0');
 var theme=q.get('theme')==='light'?'light':'dark';
 var log=document.getElementById('log');
@@ -171,15 +178,28 @@ function add(ev){
     var t=el('span','txt');fill(t,ev.parts);body.appendChild(t);
     row.appendChild(bar);row.appendChild(body);
   }
+  var atBottom=!isDock||(log.scrollHeight-log.scrollTop-log.clientHeight<60);
   log.appendChild(row);
   while(log.children.length>maxLines)log.removeChild(log.firstChild);
+  if(isDock){
+    if(atBottom){log.scrollTop=log.scrollHeight;setUnread(0);}
+    else setUnread(unread+1);   // 이전 채팅을 보는 중이면 끌어내리지 않고 "새 채팅 N개" 로 알려요
+  }
+}
+var unread=0,newbtn=document.getElementById('newbtn');
+function setUnread(n){unread=n;newbtn.style.display=n>0?'block':'none';if(n>0)newbtn.textContent='새 채팅 '+n+'개 ↓';}
+function toBottom(){log.scrollTop=log.scrollHeight;setUnread(0);}
+newbtn.addEventListener('click',toBottom);
+if(isDock){
+  log.classList.add('scroll');
+  log.addEventListener('scroll',function(){if(log.scrollHeight-log.scrollTop-log.clientHeight<60)setUnread(0);});
 }
 var ALERT=@@ALERT@@;
 if(ALERT&&q.get('alert')!=='0'&&(q.get('input')!=='1'||q.get('alert')==='1')){
   var altH=num('altheight',55,20,80),f=document.createElement('iframe');
   f.src=ALERT;f.setAttribute('sandbox','allow-scripts allow-same-origin');f.referrerPolicy='no-referrer';f.allow='autoplay';
   f.style.cssText='position:fixed;left:0;top:0;width:100%;height:'+altH+'%;border:0;background:transparent;pointer-events:none';
-  document.getElementById('alertbox').appendChild(f);log.style.maxHeight=(100-altH)+'%';log.style.overflow='hidden';
+  document.getElementById('alertbox').appendChild(f);log.style.maxHeight=(100-altH)+'%';if(!isDock)log.style.overflow='hidden';
 }
 var TOKEN="@@TOKEN@@",VER="@@VER@@";
 var dock=q.get('input')==='1';
@@ -191,7 +211,7 @@ if(dock){
   if(showStat)stat.style.display='block';
   function layout(){
     log.style.bottom=(tools.offsetHeight+4)+'px';msg.style.bottom=(tools.offsetHeight+8)+'px';
-    log.style.top=showStat?(stat.offsetHeight+4)+'px':'0px';log.style.overflow='hidden';
+    log.style.top=showStat?(stat.offsetHeight+4)+'px':'0px';newbtn.style.bottom=(tools.offsetHeight+10)+'px';
   }
   layout();window.addEventListener('resize',layout);
   function note(t){msg.textContent=t;msg.style.display=t?'block':'none';if(t)setTimeout(function(){msg.style.display='none';},4000);}

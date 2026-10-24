@@ -354,9 +354,45 @@ def _CleanWindowTitle(strTitle: str) -> str:
     return re.sub(r"\s+", " ", strTitle).strip(" -|")
 
 
-def ListFolderGames() -> List[Tuple[str, str]]:
-    """게임 설치 폴더에서 실행 중이고 창이 떠 있는 프로그램들: [(프로그램 이름, 게임 이름)]
-    게임 이름은 창 제목에서 가져와요. (창 제목이 없으면 프로그램 이름)
+def _IsNonGameExeName(strExe: str) -> bool:
+    return any(strWord in (strExe or "").lower() for strWord in LIST_NON_GAME_EXE_WORDS)
+
+
+def ClassifyProcess(strExe: str, strPath: str, strTitle: str, bUseDiscord: bool = True) -> Optional[Tuple[str, str, str]]:
+    """창이 떠 있는 프로그램 하나가 게임인지 가려내요. 게임이면 (게임 이름, 스팀 번호 또는 "", 알아낸 방법), 아니면 None.
+
+    게임을 알아내는 순서 (앞에 있을수록 믿을 수 있어요):
+      1) 스팀 설치 정보 (steamapps 폴더의 appmanifest)   → 스팀 번호 · 정확한 이름
+      2) 디스코드 공개 게임 목록 (프로그램 이름 → 게임)  → 게임 이름 · 스팀 번호
+      3) 게임 설치 폴더 안의 프로그램                     → 창 제목 (없으면 프로그램 이름)
+    게임 설치 폴더 밖의 프로그램은, 디스코드 목록에 '스팀 번호가 있는 게임' 으로 올라 있을 때만 게임으로 봐요.
+    (일반 프로그램을 게임으로 잘못 보지 않게)
+    """
+    if _IsNonGameExeName(strExe):
+        return None
+    bGameFolder = IsGameFolderPath(strPath)
+    objSteamApp = SteamAppFromExePath(strPath) if bGameFolder else None
+    if objSteamApp is not None:
+        return objSteamApp[1], objSteamApp[0], "스팀 설치 정보"
+    objDiscord = None
+    if bUseDiscord:
+        import discord_games   # 늦게 불러요 (이 파일을 시험할 때 인터넷 모듈이 필요 없게)
+        objDiscord = discord_games.Lookup(strExe)
+    if objDiscord is not None:
+        strName, strSteamId = objDiscord
+        if strSteamId and IsNonGameSteamApp(strSteamId):
+            return None                      # 스팀 도구는 게임이 아니에요.
+        if bGameFolder or strSteamId:
+            return strName, strSteamId, "디스코드 게임 목록"
+        return None                          # 폴더 밖 + 스팀 번호 없음 → 확신이 낮아서 건너뛰어요
+    if bGameFolder:
+        return _CleanWindowTitle(strTitle) or os.path.splitext(strExe)[0], "", "설치 폴더"
+    return None
+
+
+def ListFolderGames(bUseDiscord: bool = True) -> List[Tuple[str, str]]:
+    """실행 중이고 창이 떠 있는 '게임' 프로그램들: [(프로그램 이름, 게임 이름)]
+    어떻게 게임으로 보는지는 ClassifyProcess 를 보세요. 스팀 번호를 알아내면 DICT_FOLDER_STEAM_IDS 에 기억해 둬요.
     """
     if sys.platform != "win32":
         return []
@@ -393,16 +429,12 @@ def ListFolderGames() -> List[Tuple[str, str]]:
         strExe = dictTable.get(nPid, "")
         if not strExe or strExe.lower() in setSeen:
             continue
-        strPath = _ProcessPath(nPid)
-        if IsGameFolderPath(strPath):
+        objGame = ClassifyProcess(strExe, _ProcessPath(nPid), strTitle, bUseDiscord)
+        if objGame is not None:
             setSeen.add(strExe.lower())
-            objSteamApp = SteamAppFromExePath(strPath)
-            if objSteamApp is not None:   # 스팀 게임이면 이름 · 번호를 스팀 설치 정보에서 (창 제목보다 정확해요)
-                DICT_FOLDER_STEAM_IDS[strExe.lower()] = objSteamApp[0]
-                listGames.append((strExe, objSteamApp[1]))
-                continue
-            strName = _CleanWindowTitle(strTitle) or os.path.splitext(strExe)[0]
-            listGames.append((strExe, strName))
+            if objGame[1]:
+                DICT_FOLDER_STEAM_IDS[strExe.lower()] = objGame[1]
+            listGames.append((strExe, objGame[0]))
     return listGames
 
 

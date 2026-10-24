@@ -23,6 +23,7 @@ data/*.bak
 data/init.backup.json
 data/game_map.backup.txt
 data/*.tmp
+data/discord_games.json
 no_update.txt
 data/moderation_history.json
 data/moderation_history.json.tmp

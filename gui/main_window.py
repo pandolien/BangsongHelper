@@ -58,11 +58,12 @@ from youtube import DICT_DEFAULT_YOUTUBE_URLS
 from gui.youtube_hub import YouTubeHub
 from datetime import datetime
 import app_log
-from app_paths import B_TEST_MODE, STR_APP_DIR, STR_CONFIG_NAME
+from app_paths import B_TEST_MODE, DataPath, STR_APP_DIR, STR_CONFIG_NAME
 from gui.alarm import DonationAlarm
 from gui.alarm_dialog import AlarmSettingsDialog
 from gui.donation_window import RemoteControlUrl
 from gui.remote_panel import RemotePanel
+import discord_games
 import whats_new
 from obs_overlay import N_DEFAULT_PORT, IsAllowedAlertUrl, OverlayServer
 from gui.theme import BuildPalette, BuildStyleSheet, ThemeColors, ThemeDialog
@@ -593,7 +594,9 @@ class MainWindow(QMainWindow):
         self.chkFallbackVarious.toggled.connect(self.OnFallbackVariousToggled)
         objCategoryLayout.addWidget(self.chkFallbackVarious)
         self.chkFolderGames = QCheckBox("목록에 없는 게임도 알아보기")
-        self.chkFolderGames.setToolTip("에픽 · 넥슨 · 엑스박스 등 게임 설치 폴더에서 실행된 프로그램도 게임으로 봐요.")
+        self.chkFolderGames.setToolTip("스팀 설치 정보 · 에픽 · 넥슨 등 게임 설치 폴더에서 실행된 프로그램도 게임으로 봐요.\n"
+                                       "프로그램 이름이 게임 이름과 달라도(예: 철권 8) 디스코드가 공개한 게임 목록으로 알아내요.\n"
+                                       "(디스코드 프로그램 · 계정은 필요 없고, 공개 목록 파일만 하루에 한 번 받아요)")
         self.chkFolderGames.setChecked(bool(self.dictConfig["app"].get("auto_detect_folder_games", True)))
         self.chkFolderGames.toggled.connect(self.OnFolderGamesToggled)
         objCategoryLayout.addWidget(self.chkFolderGames)
@@ -1232,6 +1235,8 @@ class MainWindow(QMainWindow):
 
     def _OnFirstShown(self) -> None:
         """창이 뜬 다음: 새 버전 안내 → 이전 설정 가져오기 확인."""
+        if self.dictConfig["app"].get("use_discord_game_list", True):
+            discord_games.EnsureLoaded(DataPath("discord_games.json"), self.Log)  # 게임 이름 목록 (뒤에서 받아요)
         if self.actObs.isChecked():
             self._SetObsOverlay(True, bSave=False)  # 지난번에 켜 두었으면 다시 켜요.
         self._CheckWhatsNew()
@@ -1326,6 +1331,7 @@ class MainWindow(QMainWindow):
         objSteamClient = self.objSteamClient
         objChzzkClient = self.objChzzkClient
         bFolderGames = self.chkFolderGames.isChecked()
+        bUseDiscord = bool(self.dictConfig["app"].get("use_discord_game_list", True))
         strSteamId = self.dictConfig["steam"]["steam_id"]
         strChannelId = self.dictConfig["chzzk"]["channel_id"]
 
@@ -1342,7 +1348,7 @@ class MainWindow(QMainWindow):
             except OSError:
                 dictResult["setExes"] = set()
             try:
-                dictResult["listFolderGames"] = ListFolderGames() if bFolderGames else []
+                dictResult["listFolderGames"] = ListFolderGames(bUseDiscord) if bFolderGames else []
             except OSError:
                 dictResult["listFolderGames"] = []
             try:
@@ -1616,11 +1622,24 @@ class MainWindow(QMainWindow):
                 return
 
             strTried = ", ".join(f"'{strQuery}'" for strQuery in objResult.listQueries) or "-"
+            if bQuiet and objResult.objProbable is not None:
+                # 이름이 똑같진 않지만 거의 같은 후보가 딱 하나 → 저장은 하지 않고 이번에만 써요.
+                objProbable = objResult.objProbable
+                self.Log(f"[짝 찾기] {objGame.strGameName} → '{objProbable.strCategoryValue}' 로 추정해서 바꿔요. "
+                         "(이름이 거의 같은 후보가 하나뿐이에요. 틀리면 [게임 짝] 에서 직접 정해 주세요)")
+                self._ApplyMappedCategory(
+                    GameMapEntry(objGame.strGameId, objProbable.strCategoryType, objProbable.strCategoryId,
+                                 objProbable.strCategoryValue), objGame.strGameName, bQuiet=True)
+                return
             if bQuiet:
                 if self.chkFallbackVarious.isChecked():
                     strType, strId, strValue = TUPLE_FALLBACK_CATEGORY
+                    strHint = ""
+                    if objResult.listCandidates:   # 가까운 후보가 있었으면 알려줘서 한 번에 짝지을 수 있게
+                        strHint = " 후보: " + ", ".join(f"'{objItem.strCategoryValue}'" for objItem in objResult.listCandidates[:3]) + \
+                                  " (맞는 게 있으면 [게임 짝] 에서 한 번만 짝지어 두세요)"
                     self.Log(f"[짝 찾기] {objGame.strGameName} 은(는) 치지직 카테고리를 못 찾아서 '{strValue}' 으로 바꿔요. "
-                             f"(찾아본 말: {strTried})")
+                             f"(찾아본 말: {strTried}){strHint}")
                     self._ApplyMappedCategory(GameMapEntry(objGame.strGameId, strType, strId, strValue),
                                               objGame.strGameName, bQuiet=True)
                 else:
