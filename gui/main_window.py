@@ -44,6 +44,10 @@ from game_detect import (
 )
 from category_match import FallbackCategory, FindCategoryForGame, IsFallbackCategory, TUPLE_FALLBACK_CATEGORY
 from game_map import GameMap, GameMapEntry
+from auto_sync_state import (
+    AutoSyncState, IsRetryDue, JudgeDrift, MarkApplied, ScheduleNextRetry,
+    STR_DRIFT_CORRECT, STR_DRIFT_GIVEUP, STR_DRIFT_OVERRIDE,
+)
 from gui.chat_hub import ChatHub
 from gui.chat_window import ChatWindow
 from gui.donation_window import DonationWindow
@@ -195,6 +199,10 @@ class MainWindow(QMainWindow):
         self.objPendingMapGame: Optional[DetectedGame] = None
         # 자동 카테고리 변경을 마지막으로 처리한 게임 (같은 게임으로 계속 바꾸지 않게)
         self.strLastAutoSyncGameId: Optional[str] = None
+        # 지금 게임에 대한 자동 변경 기록 (무엇을 언제 적용했는지 → 실제 카테고리와 어긋났는지 판단해요)
+        self.objAutoState: Optional[AutoSyncState] = None
+        # 가장 최근에 확인한 '치지직에 실제로 설정된 카테고리 ID' (모르면 None)
+        self.strLastActualCategoryId: Optional[str] = None
         # '지금 방송 설정' 을 한 번 불러왔는지 (로그인하면 자동으로 한 번 불러와요)
         self.bLiveSettingLoaded = False
         # 실시간 채팅창 (처음 열 때 만들어요)
@@ -1451,6 +1459,9 @@ class MainWindow(QMainWindow):
         bUseDiscord = bool(self.dictConfig["app"].get("use_discord_game_list", True))
         strSteamId = self.dictConfig["steam"]["steam_id"]
         strChannelId = self.dictConfig["chzzk"]["channel_id"]
+        # 자동 변경이 켜져 있고 로그인돼 있으면, 치지직에 실제로 설정된 카테고리도 같이 확인해요.
+        bCheckActual = bool(self.chkAutoSyncCategory.isChecked() and objChzzkClient is not None
+                            and objChzzkClient.bIsLoggedIn)
 
         def _FetchAll():
             """스팀과 치지직을 따로따로 조회해서, 한쪽 실패가 다른 쪽을 막지 않게 해요."""
@@ -1474,6 +1485,12 @@ class MainWindow(QMainWindow):
                 dictResult["objChzzk"] = objChzzkClient.GetLiveDetail(strChannelId)
             except ChzzkApiError as objError:
                 dictResult["objChzzk"] = objError
+            dictResult["objSetting"] = None
+            if bCheckActual:
+                try:
+                    dictResult["objSetting"] = objChzzkClient.GetLiveSetting()
+                except ChzzkApiError:
+                    pass  # 못 가져오면 이번엔 비교를 건너뛰어요.
             return dictResult
 
         def _Done(dictResult):
@@ -1482,8 +1499,13 @@ class MainWindow(QMainWindow):
             self._ShowSteam(dictResult["objSteam"])
             self.setLastRunningExes = dictResult["setExes"]
             self.listLastFolderGames = dictResult["listFolderGames"]
+            objActualSetting = dictResult.get("objSetting")
+            strActualId = (objActualSetting.strCategoryId if objActualSetting is not None else None) or None
+            self.strLastActualCategoryId = strActualId  # 새 게임에 적용하기 전의 값 (= '바꾸기 전 카테고리')
             self._UpdateCurrentGame()
             self._ShowChzzk(dictResult["objChzzk"])
+            self._CheckCategoryDrift(strActualId)
+            self._MaybeRetryTemporary()
             self.lblLastUpdated.setText(time.strftime("마지막 갱신 %H:%M:%S"))
 
         def _Fail(objError):
@@ -1675,9 +1697,12 @@ class MainWindow(QMainWindow):
             return
         objPendingGame = self.objPendingMapGame
 
+        strPrevActual = self.strLastActualCategoryId
+
         def _Done(objSetting):
             self._ShowLiveSetting(objSetting)
             self.Log(f"카테고리 변경: {objSetting.strCategoryValue or objCategory.strCategoryValue}")
+            self._OnManualCategoryApplied(objSetting, objCategory, objPendingGame, strPrevActual)
             if objPendingGame is not None and IsFallbackCategory(objCategory.strCategoryId):
                 # '종합 게임' 은 짝으로 저장하지 않아요. (나중에 치지직에 카테고리가 생기면 그걸 쓰게)
                 self.Log(f"[안내] '종합 게임' 은 짝으로 저장하지 않아요: {objPendingGame.strGameName}")
@@ -1695,6 +1720,22 @@ class MainWindow(QMainWindow):
             ),
             _Done,
         )
+
+    def _OnManualCategoryApplied(self, objSetting, objCategory, objPendingGame: Optional[DetectedGame],
+                                 strPrevActual: Optional[str]) -> None:
+        """[카테고리 적용] 으로 사용자가 직접 정했을 때 → 자동 변경이 그 선택을 덮어쓰지 않게 해요."""
+        self.strLastActualCategoryId = objCategory.strCategoryId
+        objState = self.objAutoState
+        if objState is None:
+            return
+        if (objPendingGame is not None and objPendingGame.strGameId == objState.strGameId
+                and not IsFallbackCategory(objCategory.strCategoryId)):
+            # '지금 게임으로 맞추기' 에서 고른 짝 → 확정된 짝이에요 (이후 어긋나면 다시 맞춰 줘요)
+            objState.bUserOverride = False
+            MarkApplied(objState, objCategory.strCategoryType, self.strLastActualCategoryId,
+                        objCategory.strCategoryValue, strPrevActual, False, time.monotonic())
+        else:
+            objState.bUserOverride = True  # 직접 고른 카테고리는 이 게임이 끝날 때까지 건드리지 않아요
 
     def OnSyncSteamGameClicked(self) -> None:
         """지금 하는 게임(스팀 또는 실행 중인 프로그램)에 맞춰 치지직 카테고리를 바꿔요.
@@ -1748,7 +1789,7 @@ class MainWindow(QMainWindow):
                          "(이름이 거의 같은 후보가 하나뿐이에요. 틀리면 [게임 짝] 에서 직접 정해 주세요)")
                 self._ApplyMappedCategory(
                     GameMapEntry(objGame.strGameId, objProbable.strCategoryType, objProbable.strCategoryId,
-                                 objProbable.strCategoryValue), objGame.strGameName, bQuiet=True)
+                                 objProbable.strCategoryValue), objGame.strGameName, bQuiet=True, bTemporary=True)
                 return
             if bQuiet:
                 if self.chkFallbackVarious.isChecked():
@@ -1760,7 +1801,7 @@ class MainWindow(QMainWindow):
                     self.Log(f"[짝 찾기] {objGame.strGameName} 은(는) 치지직 카테고리를 못 찾아서 '{strValue}' 으로 바꿔요. "
                              f"(찾아본 말: {strTried}){strHint}")
                     self._ApplyMappedCategory(GameMapEntry(objGame.strGameId, strType, strId, strValue),
-                                              objGame.strGameName, bQuiet=True)
+                                              objGame.strGameName, bQuiet=True, bTemporary=True)
                     self._ShowNotice(f"'{objGame.strGameName}' 카테고리를 못 찾아서 '{strValue}' 으로 맞췄어요. "
                                      "맞는 카테고리가 있으면 [짝 지정하기] (OBS 독은 아래 버튼) 로 한 번만 골라 주세요.",
                                      objGame, objResult.listCandidates)
@@ -1825,16 +1866,28 @@ class MainWindow(QMainWindow):
         if self.objNoticeGame is not None and self.objNoticeGame.strGameId == objSteam.strGameId:
             self._ClearNotice()  # 이 게임의 짝을 정했으니 알림은 이제 필요 없어요.
 
-    def _ApplyMappedCategory(self, objEntry: GameMapEntry, strGameName: str, bQuiet: bool = False) -> None:
-        """짝 목록에 적힌 카테고리를 치지직에 적용해요."""
+    def _ApplyMappedCategory(self, objEntry: GameMapEntry, strGameName: str, bQuiet: bool = False,
+                             bTemporary: bool = False, bCorrection: bool = False) -> None:
+        """짝 목록에 적힌 카테고리를 치지직에 적용해요.
+
+        bTemporary  : 추정 / 종합 게임처럼 확실하지 않은 적용 (나중에 자동으로 다시 찾아봐요)
+        bCorrection : 적용이 안 먹혀서 다시 맞추는 중 (실패해도 처음부터 다시 하지 않아요)
+        """
         objClient = self.objChzzkClient if bQuiet else self._RequireChzzk()
         if objClient is None:
             return
         strShowName = objEntry.strCategoryValue or objEntry.strCategoryId
+        strPrevActual = self.strLastActualCategoryId  # 바꾸기 전에 설정돼 있던 카테고리
+
+        def _Done(objSetting):
+            self._ShowLiveSetting(objSetting)
+            self.Log(f"카테고리 변경: {strGameName} → {strShowName}")
+            self._OnCategoryApplied(objEntry, objSetting, strPrevActual, bTemporary, bCorrection)
 
         def _Fail(objError):
             if bQuiet:
-                self.strLastAutoSyncGameId = None  # 실패했으니 다음 새로고침 때 다시 시도해요.
+                if not bCorrection:
+                    self.strLastAutoSyncGameId = None  # 실패했으니 다음 새로고침 때 다시 시도해요.
                 self.Log(f"[경고] 자동 카테고리 변경 실패 ({strGameName}): {objError}")
             else:
                 self.ShowError(objError)
@@ -1842,10 +1895,94 @@ class MainWindow(QMainWindow):
         self.RunInBackground(
             lambda: objClient.UpdateLiveSetting(strCategoryType=objEntry.strCategoryType,
                                                 strCategoryId=objEntry.strCategoryId),
-            lambda objSetting: (self._ShowLiveSetting(objSetting),
-                                self.Log(f"카테고리 변경: {strGameName} → {strShowName}")),
+            _Done,
             _Fail,
         )
+
+    def _OnCategoryApplied(self, objEntry: GameMapEntry, objSetting, strPrevActual: Optional[str],
+                           bTemporary: bool, bCorrection: bool) -> None:
+        """카테고리 적용에 성공했을 때 → 무엇을 언제 적용했는지 기억해 둬요. (나중에 어긋났는지 비교하려고)"""
+        strAppliedId = objEntry.strCategoryId  # 요청한 값을 기준으로 해요 (응답이 예전 값일 수도 있어서)
+        self.strLastActualCategoryId = strAppliedId
+        objState = self.objAutoState
+        if objState is None or objState.strGameId != objEntry.strSteamGameId:
+            return  # 그 사이 다른 게임으로 바뀌었어요
+        if not bCorrection:
+            objState.bUserOverride = False  # 프로그램이나 사용자가 새로 정해서 적용했으니 다시 맞춰 줘도 돼요
+        MarkApplied(objState,
+                    getattr(objSetting, "strCategoryType", None) or objEntry.strCategoryType,
+                    strAppliedId,
+                    getattr(objSetting, "strCategoryValue", None) or objEntry.strCategoryValue or strAppliedId,
+                    strPrevActual, bTemporary, time.monotonic(), bCorrection=bCorrection)
+
+    def _CheckCategoryDrift(self, strActualId: Optional[str]) -> None:
+        """(새로고침 때마다 불림) 치지직의 실제 카테고리가 프로그램이 맞춘 것과 다른지 보고 처리해요.
+
+        - 적용이 안 먹혔으면(바꾸기 전 값 그대로) → 자동으로 다시 맞춰요 (게임당 최대 2번)
+        - 사용자가 직접 바꾼 것 같으면 → 이 게임이 끝날 때까지 건드리지 않아요
+        """
+        objState = self.objAutoState
+        if objState is None or not self.chkAutoSyncCategory.isChecked():
+            return
+        strVerdict = JudgeDrift(objState, strActualId, time.monotonic())
+        if strVerdict == STR_DRIFT_OVERRIDE:
+            objState.bUserOverride = True
+            self.Log(f"[자동 변경] {objState.strGameName}: 치지직 카테고리가 직접 바뀐 것 같아요 → "
+                     "이 게임이 끝날 때까지 자동으로 건드리지 않아요.")
+            if self.objNoticeGame is not None and self.objNoticeGame.strGameId == objState.strGameId:
+                self._ClearNotice()  # 직접 정했으니 '골라 주세요' 알림은 필요 없어요
+        elif strVerdict == STR_DRIFT_GIVEUP:
+            objState.bUserOverride = True
+            self.Log(f"[경고] {objState.strGameName}: 카테고리를 여러 번 다시 맞췄는데도 그대로예요 → 자동 맞추기를 그만둬요. "
+                     "[방송 관리] 에서 직접 맞춰 주세요.")
+        elif strVerdict == STR_DRIFT_CORRECT:
+            objState.nCorrections += 1
+            self.Log(f"[자동 변경] {objState.strGameName}: 치지직 카테고리가 '{objState.strCategoryValue}' 로 바뀌지 않았어요 → "
+                     f"다시 맞춰요 ({objState.nCorrections}번째)")
+            self._ApplyMappedCategory(
+                GameMapEntry(objState.strGameId, objState.strCategoryType, objState.strCategoryId, objState.strCategoryValue),
+                objState.strGameName, bQuiet=True, bTemporary=objState.bTemporary, bCorrection=True)
+
+    def _MaybeRetryTemporary(self) -> None:
+        """(새로고침 때마다 불림) '추정' / '종합 게임' 으로 임시 적용한 게임은, 시간이 지난 뒤 자동으로 다시 찾아봐요.
+        확실한 짝이 나오면 저장하고 바로 교체해요. 사용자가 직접 바꾼 게임은 건드리지 않아요."""
+        objState = self.objAutoState
+        objGame = self.objCurrentGame
+        objClient = self.objChzzkClient
+        if (objState is None or objGame is None or objClient is None or not self.chkAutoSyncCategory.isChecked()
+                or objState.strGameId != objGame.strGameId or not objClient.bIsLoggedIn):
+            return
+        fNow = time.monotonic()
+        if not IsRetryDue(objState, fNow):
+            return
+        ScheduleNextRetry(objState, fNow)
+        objState.bRetrying = True
+        self.Log(f"[짝 찾기] {objGame.strGameName}: 임시로 맞춘 '{objState.strCategoryValue}' 대신 확실한 짝이 있는지 "
+                 f"다시 찾아봐요. ({objState.nRetries}번째)")
+
+        def _Done(objResult):
+            objState.bRetrying = False
+            if self.objAutoState is not objState or objState.bUserOverride:
+                return
+            if objResult.objBest is not None:
+                objBest = objResult.objBest
+                self._SaveGameMap(objGame, objBest.strCategoryType, objBest.strCategoryId, objBest.strCategoryValue)
+                self.Log(f"[짝 찾기] 이제 확실한 짝을 찾았어요: {objGame.strGameName} → {objBest.strCategoryValue}")
+                objEntry = self.objGameMap.Get(objGame.strGameId)
+                if objEntry is not None:
+                    self._ApplyMappedCategory(objEntry, objGame.strGameName, bQuiet=True)
+            elif objResult.objProbable is not None and IsFallbackCategory(objState.strCategoryId):
+                objProbable = objResult.objProbable
+                self.Log(f"[짝 찾기] {objGame.strGameName}: '종합 게임' 대신 '{objProbable.strCategoryValue}' 로 추정해서 바꿔요.")
+                self._ApplyMappedCategory(
+                    GameMapEntry(objGame.strGameId, objProbable.strCategoryType, objProbable.strCategoryId,
+                                 objProbable.strCategoryValue), objGame.strGameName, bQuiet=True, bTemporary=True)
+
+        def _Fail(objError):
+            objState.bRetrying = False
+            self.Log(f"[짝 찾기] 다시 찾기 실패: {objError}")
+
+        self.RunInBackground(lambda: FindCategoryForGame(objClient, objGame.strGameId, objGame.strGameName), _Done, _Fail)
 
     def _AutoSyncCategory(self, objSteam: Optional[DetectedGame]) -> None:
         """(새로고침 때마다 불림) 게임이 바뀌었고 짝이 있으면 카테고리를 자동으로 바꿔요."""
@@ -1853,10 +1990,12 @@ class MainWindow(QMainWindow):
             return
         if objSteam is None:
             self.strLastAutoSyncGameId = None  # 게임을 끄면 초기화 → 다시 켜면 또 맞춰줘요.
+            self.objAutoState = None
             return
         if objSteam.strGameId == self.strLastAutoSyncGameId:
             return  # 이미 처리한 게임
         self.strLastAutoSyncGameId = objSteam.strGameId
+        self.objAutoState = AutoSyncState(strGameId=objSteam.strGameId, strGameName=objSteam.strGameName)
 
         if self.objChzzkClient is None or not self.objChzzkClient.bIsLoggedIn:
             self.Log("[안내] 자동 카테고리 변경은 치지직 로그인이 필요해요. 맨 위 [치지직 로그인] 을 눌러 주세요.")
